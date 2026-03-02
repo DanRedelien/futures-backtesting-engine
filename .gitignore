@@ -27,6 +27,4 @@ cache/
 Thumbs.db
 
 # Sensitive Data and Alpha Research Modules
-data/
-src/data/
-dev_context/
+# (Removed to allow tracking in private repository)
