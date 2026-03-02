@@ -11,14 +11,21 @@ Includes 'Skeptic' analysis tools:
 from typing import Dict, Any, List, Optional, Type
 from dataclasses import dataclass, field
 from collections import Counter
+import time
 import pandas as pd
 import numpy as np
 import math
+import optuna
+import optuna.logging
 
 from ..settings import BacktestSettings, get_settings
 from .fold_generator import PurgedFoldGenerator
 from .optimizer import OptunaOptimizer
 from src.data.data_lake import DataLake
+
+
+# Suppress Optuna logging to warnings only
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -113,6 +120,11 @@ class WFVReport:
     candidate_params: Dict[str, Any] = field(default_factory=dict)
     verdict: str = "FAIL"
     warnings: List[str] = field(default_factory=list)
+
+    # Computational Profiling
+    total_wfo_time_sec: float = 0.0
+    avg_fold_time_sec: float = 0.0
+    avg_trial_time_sec: float = 0.0
 
     def compute(self) -> None:
         if not self.fold_results:
@@ -261,15 +273,24 @@ class WalkForwardOptimizer:
         folds = list(splitter.split(data))
 
         fold_results = []
+        total_trials = 0
+        wfo_start_time = time.time()
+
+        # Silence Optuna's trial-by-trial logs for a cleaner console
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
 
         print(f"\n[WFV] Starting {n_folds}-Fold Walk-Forward on {symbol}...")
 
         for i, (train_idx, test_idx) in enumerate(folds):
-            # Convert indices to date boundaries
+            # Convert indices to date boundaries AND slice data
             train_start = data.index[train_idx[0]]
             train_end = data.index[train_idx[-1]]
             test_start = data.index[test_idx[0]]
             test_end = data.index[test_idx[-1]]
+            
+            # Extract DataFrame slices once per fold
+            train_slice = data.iloc[train_idx]
+            test_slice = data.iloc[test_idx]
 
             print(
                 f"\n  Fold {i + 1}/{len(folds)}: "
@@ -277,24 +298,29 @@ class WalkForwardOptimizer:
                 f"OOS {test_start.date()} → {test_end.date()}"
             )
 
-            # 1. Optimize (IS) — date-bounded
+            # 1. Optimize (IS) — dataset injected
+            fold_start_time = time.time()
             opt_result = self.base_optimizer.optimize_on_slice(
                 strategy_class=strategy_class,
                 start_date=train_start,
                 end_date=train_end,
+                data=train_slice,
                 n_trials=n_trials,
                 fold_id=i,
             )
+            fold_end_time = time.time()
 
             n_trials_actual = opt_result.get("n_trials", n_trials)
+            total_trials += n_trials_actual
             trial_std = opt_result.get("trial_std", 0.1)
 
-            # 2. Evaluate (OOS) — date-bounded
+            # 2. Evaluate (OOS) — dataset injected
             eval_result = self.base_optimizer.evaluate_on_slice(
                 strategy_class=strategy_class,
                 params=opt_result["best_params"],
                 start_date=test_start,
                 end_date=test_end,
+                data=test_slice,
             )
 
             fold_results.append(
@@ -315,12 +341,20 @@ class WalkForwardOptimizer:
 
             print(
                 f"  Fold {i + 1}: IS {opt_result['best_score']:.2f} → "
-                f"OOS {eval_result['score']:.2f}"
+                f"OOS {eval_result['score']:.2f} "
+                f"({fold_end_time - fold_start_time:.1f}s)"
             )
+
+        wfo_end_time = time.time()
+        total_time = wfo_end_time - wfo_start_time
 
         report = WFVReport(
             symbol, strategy_class.__name__, len(folds), fold_results
         )
+        report.total_wfo_time_sec = total_time
+        report.avg_fold_time_sec = total_time / len(folds) if folds else 0.0
+        report.avg_trial_time_sec = total_time / total_trials if total_trials else 0.0
+
         report.compute()
 
         self._print_human_report(report)
@@ -356,6 +390,11 @@ class WalkForwardOptimizer:
             f"  Skeptic Confidence (DSR): {report.avg_dsr:.0%} "
             f"(Prob. Skill > Noise)"
         )
+        
+        print(f"\n[COMPUTATIONAL PROFILE]")
+        print(f"  Total WFO Runtime: {report.total_wfo_time_sec / 60:.1f} mins")
+        print(f"  Average Fold Time: {report.avg_fold_time_sec:.1f} secs")
+        print(f"  Average Trial Time: {report.avg_trial_time_sec:.3f} secs")
 
         if report.warnings:
             print(f"\n[RISK FLAGS]")

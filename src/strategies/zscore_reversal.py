@@ -1,0 +1,377 @@
+"""
+Z-Score Mean Reversion Strategy.
+
+Methodology:
+  Computes a rolling Z-Score of the closing price.
+  Z = (Close - Rolling_Mean) / Rolling_StdDev
+  
+  Signal logic:
+    - Enter LONG  when Z-Score < -2.0 (Price is unusually low).
+    - Enter SHORT when Z-Score > 2.0  (Price is unusually high).
+    - Exit on ATR stop-loss or ATR take-profit.
+
+  Filters:
+    - Directional Bias   : Long-term SMA. Trade shorts only below SMA, longs above SMA.
+    - Volatility Regime  : Blocks entries during dead/compression or panic/expansion regimes.
+    - Trend T-Stat       : Blocks mean reversion when a strong directional trend is detected.
+    - Stationarity (ADF) : Blocks mean reversion when the ADF test indicates a non-stationary
+                           (unit root) regime, meaning standard mean-reversion edges vanish.
+
+All indicators are pre-computed on the full dataset during __init__ and
+accessed via a .get(timestamp) lookup in on_bar() — zero look-ahead bias.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from src.backtest_engine.execution import Order
+from src.strategies.base import BaseStrategy
+from src.strategies.filters import ADFFilter, TrendFilter, VolatilityRegimeFilter
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ZScoreReversalConfig:
+    """
+    All tunable parameters for the Z-Score Reversal strategy.
+
+    Signal Generation
+    ─────────────────
+    zscore_window    : Lookback period for Mean and Standard Deviation computation.
+    zscore_entry_lvl : Absolute Z-Score threshold for entries. LONG below -lvl, SHORT above +lvl.
+
+    Risk Management
+    ───────────────
+    atr_window       : Lookback window for ATR.
+    atr_sl_mult      : Stop-loss distance as a multiple of ATR.
+    atr_tp_mult      : Take-profit distance as a multiple of ATR.
+
+    Direction Filter
+    ────────────────
+    trade_direction  : "both" | "long" | "short"
+    
+    Trend SMA Bias
+    ──────────────
+    trend_sma_window : Long-term SMA length. When price > SMA, only LONGS are permitted.
+                       When price < SMA, only SHORTS are permitted. None = disabled.
+
+    Trend Filter (T-Stat)
+    ─────────────────────
+    use_trend_filter : Enable/disable T-stat trend gate.
+    trend_window     : Rolling OLS regression window for the trend.
+    trend_max_tstat  : Maximum absolute T-stat to allow trade. Higher = stronger trend.
+
+    Volatility Regime Filter
+    ────────────────────────
+    use_vol_filter     : Enable/disable regime gate.
+    vol_regime_window  : Short-term window for current vol measurement.
+    vol_history_window : Historical window for percentile ranking.
+    vol_min_pct        : Minimum vol percentile (blocks dead markets).
+    vol_max_pct        : Maximum vol percentile (blocks panic markets).
+
+    ADF Stationarity Filter
+    ───────────────────────
+    use_adf_filter     : Enable/disable the Augmented Dickey-Fuller stationarity check.
+    adf_window         : Number of resampled bars used for the test.
+    adf_timeframe      : Resample frequency (default '1h').
+    adf_max_pvalue     : Maximum acceptable p-value for stationarity. If > max, market is trending.
+    """
+    # ── Signal generation ──────────────────────────────────────────────────────
+    zscore_window: int = 20
+    zscore_entry_lvl: float = 2.0
+
+    # ── Risk management ────────────────────────────────────────────────────────
+    atr_window: int = 14
+    atr_sl_mult: float = 1.0
+    atr_tp_mult: float = 2.0
+
+    # ── Direction ──────────────────────────────────────────────────────────────
+    trade_direction: str = "both"
+
+    # ── Trend SMA bias ─────────────────────────────────────────────────────────
+    trend_sma_window: Optional[int] = 1000
+
+    # ── T-stat trend filter ────────────────────────────────────────────────────
+    use_trend_filter: bool = True
+    trend_window: int = 100
+    trend_max_tstat: float = 1.2
+
+    # ── Volatility regime filter ───────────────────────────────────────────────
+    use_vol_filter: bool = True
+    vol_regime_window: int = 50
+    vol_history_window: int = 500
+    vol_min_pct: float = 0.20
+    vol_max_pct: float = 0.80
+
+    # ── ADF Stationarity filter ────────────────────────────────────────────────
+    use_adf_filter: bool = False
+    adf_window: int = 72
+    adf_timeframe: str = "1h"
+    adf_max_pvalue: float = 0.05
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Strategy
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ZScoreReversalStrategy(BaseStrategy):
+    """
+    Classical Z-Score Reversal Strategy.
+
+    Pre-computes Z-Score and all filters in __init__, shifts by 1 bar to prevent
+    look-ahead bias, and executes via O(1) lookups in on_bar.
+    """
+
+    def __init__(self, engine, config: Optional[ZScoreReversalConfig] = None) -> None:
+        super().__init__(engine)
+
+        cfg = config or ZScoreReversalConfig()
+
+        # WFO parameter injection: engine.settings may carry zscore_* keys
+        for field in dataclasses.fields(cfg):
+            wfo_key = f"zscore_{field.name}"
+            if hasattr(engine.settings, wfo_key):
+                setattr(cfg, field.name, getattr(engine.settings, wfo_key))
+
+        self.config = cfg
+
+        close = engine.data["close"]
+        high  = engine.data["high"]
+        low   = engine.data["low"]
+
+        # ── Z-Score ────────────────────────────────────────────────────────────
+        roll_mean = close.rolling(window=cfg.zscore_window, min_periods=cfg.zscore_window // 2).mean()
+        roll_std = close.rolling(window=cfg.zscore_window, min_periods=cfg.zscore_window // 2).std()
+        
+        # Avoid division by zero
+        roll_std = roll_std.replace(0, np.nan)
+        zscore = (close - roll_mean) / roll_std
+
+        # ── ATR (Wilder EWM) ───────────────────────────────────────────────────
+        tr = pd.concat(
+            [
+                high - low,
+                (high - close.shift(1)).abs(),
+                (low  - close.shift(1)).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        atr = tr.ewm(span=cfg.atr_window, adjust=False).mean()
+
+        # Shift by 1 → strategy sees previous bar's data only
+        self._zscore: pd.Series = zscore.shift(1)
+        self._atr:    pd.Series = atr.shift(1)
+        self._close:  pd.Series = close.shift(1)
+
+        # ── Trend SMA ──────────────────────────────────────────────────────────
+        self._trend_sma: Optional[pd.Series] = None
+        if cfg.trend_sma_window is not None:
+            ts = close.rolling(window=cfg.trend_sma_window, min_periods=cfg.trend_sma_window // 2).mean()
+            self._trend_sma = ts.shift(1)
+            print(f"[Z-SCORE] TrendBias SMA enabled (window={cfg.trend_sma_window})")
+
+        # ── Volatility regime filter ───────────────────────────────────────────
+        self._vol_filter: Optional[VolatilityRegimeFilter] = None
+        if cfg.use_vol_filter:
+            self._vol_filter = VolatilityRegimeFilter(
+                price=close,
+                regime_window=cfg.vol_regime_window,
+                history_window=cfg.vol_history_window,
+                min_pct=cfg.vol_min_pct,
+                max_pct=cfg.vol_max_pct,
+            )
+            print(f"[Z-SCORE] VolFilter enabled (window={cfg.vol_regime_window})")
+
+        # ── T-stat trend filter ────────────────────────────────────────────────
+        self._trend_filter: Optional[TrendFilter] = None
+        if cfg.use_trend_filter:
+            self._trend_filter = TrendFilter(
+                price=close,
+                window=cfg.trend_window,
+                max_t_stat=cfg.trend_max_tstat,
+            )
+            print(f"[Z-SCORE] TrendFilter enabled (window={cfg.trend_window}, max_tstat={cfg.trend_max_tstat})")
+
+        # ── ADF filter ─────────────────────────────────────────────────────────
+        self._adf_filter: Optional[ADFFilter] = None
+        if cfg.use_adf_filter:
+            self._adf_filter = ADFFilter(
+                series=close,
+                adf_window=cfg.adf_window,
+                timeframe=cfg.adf_timeframe,
+                max_pvalue=cfg.adf_max_pvalue,
+            )
+            print(f"[Z-SCORE] ADFFilter enabled (window={cfg.adf_window}, tf={cfg.adf_timeframe}, max_p={cfg.adf_max_pvalue})")
+
+        # ── State ──────────────────────────────────────────────────────────────
+        self._invested: bool = False
+        self._position_side: Optional[str] = None
+        self._sl_price: float = 0.0
+        self._tp_price: float = 0.0
+        
+        self._zscore_entry_lvl = cfg.zscore_entry_lvl
+
+        print(
+            f"[Z-SCORE] Ready | z_window={cfg.zscore_window} "
+            f"| direction={cfg.trade_direction} "
+        )
+
+    # ── WFO interface ──────────────────────────────────────────────────────────
+
+    @classmethod
+    def get_search_space(cls) -> Dict[str, Any]:
+        """
+        Optuna search bounds for Walk-Forward Optimisation.
+        """
+        return {
+            "zscore_zscore_window":      (20,  200, 10),
+            "zscore_zscore_entry_lvl":   (1.5, 3.5, 0.25),
+            "zscore_atr_sl_mult":        (0.5, 4.0, 0.5),
+            "zscore_atr_tp_mult":        (1.0, 5.0, 0.5),
+            "zscore_trend_sma_window":   (200, 4000, 200),
+            "zscore_trend_max_tstat":    (1.0, 3.0, 0.25),
+            "zscore_vol_min_pct":        (0.10, 0.40, 0.05),
+            "zscore_vol_max_pct":        (0.60, 0.90, 0.05),
+            "zscore_adf_max_pvalue":     (0.01, 0.15, 0.02),
+        }
+
+    # ── Main event hook ────────────────────────────────────────────────────────
+
+    def on_bar(self, bar: pd.Series) -> List[Order]:
+        """
+        Called once per bar. Evaluates pre-computed Z-Score and manages exits.
+
+        Args:
+            bar: Current OHLCV bar; bar.name is the timestamp.
+
+        Returns:
+            List of Order objects (may be empty).
+        """
+        timestamp = bar.name
+        z_val     = self._zscore.get(timestamp, np.nan)
+        atr_val   = self._atr.get(timestamp, np.nan)
+        c_close   = bar["close"]
+        c_high    = bar["high"]
+        c_low     = bar["low"]
+
+        if np.isnan(z_val) or np.isnan(atr_val):
+            return []
+
+        orders: List[Order] = []
+
+        # ── In position: manage SL / TP exits ─────────────────────────────────
+        if self._invested:
+            if self._position_side == "LONG":
+                if c_low <= self._sl_price or c_high >= self._tp_price:
+                    reason = "STOP_LOSS" if c_low <= self._sl_price else "TAKE_PROFIT"
+                    orders.append(
+                        self.market_order("SELL", self.settings.fixed_qty, reason=reason)
+                    )
+                    self._reset_state()
+                    return orders
+
+            elif self._position_side == "SHORT":
+                if c_high >= self._sl_price or c_low <= self._tp_price:
+                    reason = "STOP_LOSS" if c_high >= self._sl_price else "TAKE_PROFIT"
+                    orders.append(
+                        self.market_order("BUY", self.settings.fixed_qty, reason=reason)
+                    )
+                    self._reset_state()
+                    return orders
+
+        # ── No position: check for entries ────────────────────────────────────
+        if not self._invested:
+            crossover = 0.0
+            if z_val < -self._zscore_entry_lvl:
+                crossover = 1.0   # Want to go LONG
+            elif z_val > self._zscore_entry_lvl:
+                crossover = -1.0  # Want to go SHORT
+
+            if crossover != 0.0 and self._filters_allow(timestamp, crossover):
+                if crossover == 1.0:
+                    sl_dist = atr_val * self.config.atr_sl_mult
+                    tp_dist = atr_val * self.config.atr_tp_mult
+                    
+                    self._invested      = True
+                    self._position_side = "LONG"
+                    self._sl_price      = c_close - sl_dist
+                    self._tp_price      = c_close + tp_dist
+                    
+                    orders.append(
+                        self.market_order("BUY", self.settings.fixed_qty, reason="Z_LONG")
+                    )
+                
+                elif crossover == -1.0:
+                    sl_dist = atr_val * self.config.atr_sl_mult
+                    tp_dist = atr_val * self.config.atr_tp_mult
+                    
+                    self._invested      = True
+                    self._position_side = "SHORT"
+                    self._sl_price      = c_close + sl_dist
+                    self._tp_price      = c_close - tp_dist
+                    
+                    orders.append(
+                        self.market_order("SELL", self.settings.fixed_qty, reason="Z_SHORT")
+                    )
+
+        return orders
+
+    # ── Filters ────────────────────────────────────────────────────────────────
+
+    def _filters_allow(self, timestamp, crossover: float) -> bool:
+        """
+        Returns True only when all enabled filters permit an entry.
+
+        Args:
+            timestamp: Current bar timestamp.
+            crossover: +1.0 for a LONG signal, -1.0 for a SHORT signal.
+        """
+        # ── Direction filter ──────────────────────────────────────────────────
+        direction = self.config.trade_direction.lower()
+        if direction == "long"  and crossover == -1.0:
+            return False
+        if direction == "short" and crossover == 1.0:
+            return False
+
+        # ── Volatility regime ─────────────────────────────────────────────────
+        if self._vol_filter and not self._vol_filter.is_allowed(timestamp):
+            return False
+
+        # ── Trend T-stat ──────────────────────────────────────────────────────
+        if self._trend_filter and not self._trend_filter.is_allowed(timestamp):
+            return False
+            
+        # ── ADF Stationarity filter ───────────────────────────────────────────
+        if self._adf_filter and not self._adf_filter.is_allowed(timestamp):
+            return False
+
+        # ── Directional bias via long-term SMA ───────────────────────────────
+        if self._trend_sma is not None:
+            sma_val   = self._trend_sma.get(timestamp, np.nan)
+            cur_close = self._close.get(timestamp, np.nan)
+            if not (np.isnan(sma_val) or np.isnan(cur_close)):
+                above_sma = cur_close > sma_val
+                if crossover == 1.0 and not above_sma:
+                    return False   # LONG signal but price below long-term SMA
+                if crossover == -1.0 and above_sma:
+                    return False   # SHORT signal but price above long-term SMA
+
+        return True
+
+    # ── State reset ────────────────────────────────────────────────────────────
+
+    def _reset_state(self) -> None:
+        """Clears all open-position tracking variables."""
+        self._invested       = False
+        self._position_side  = None
+        self._sl_price       = 0.0
+        self._tp_price       = 0.0

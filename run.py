@@ -5,8 +5,12 @@ Usage:
   python run.py --download GC ES NQ RTY YM CL SI
   python run.py --backtest --strategy sma
   python run.py --backtest --strategy mean_rev
+  python run.py --backtest --strategy ict_ob
+  python run.py --backtest --strategy zscore
   python run.py --wfo --strategy sma
   python run.py --wfo --strategy mean_rev
+  python run.py --wfo --strategy ict_ob
+  python run.py --wfo --strategy zscore
 """
 
 import argparse
@@ -22,7 +26,7 @@ def _load_strategy(name: str):
     Returns the strategy class for the given short name.
 
     Args:
-        name: Strategy identifier ('sma' or 'mean_rev').
+        name: Strategy identifier ('sma', 'mean_rev', 'ict_ob', or 'zscore').
 
     Returns:
         Strategy class (subclass of BaseStrategy).
@@ -30,6 +34,8 @@ def _load_strategy(name: str):
     registry = {
         "sma":      "src.strategies.sma_crossover:SmaCrossoverStrategy",
         "mean_rev": "src.strategies.mean_reversion:MeanReversionStrategy",
+        "ict_ob":   "src.strategies.ict_order_block:IctOrderBlockStrategy",
+        "zscore":   "src.strategies.zscore_reversal:ZScoreReversalStrategy",
     }
 
     if name not in registry:
@@ -59,7 +65,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--strategy", type=str, default="sma",
-        help="Strategy to use: 'sma' or 'mean_rev'",
+        help="Strategy to use: 'sma', 'mean_rev', 'ict_ob', or 'zscore'",
     )
     args = parser.parse_args()
 

@@ -115,6 +115,7 @@ class BacktestEngine:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         settings: Optional[BacktestSettings] = None,
+        data: Optional[pd.DataFrame] = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.execution = ExecutionHandler(self.settings)
@@ -126,7 +127,9 @@ class BacktestEngine:
         self.end_date = end_date
         self.portfolio = Portfolio(self.settings.initial_capital)
         self.strategy = None
-        self.data: pd.DataFrame = pd.DataFrame()
+        
+        # Inject pre-sliced data if provided (e.g., from WFO)
+        self.data: pd.DataFrame = data if data is not None else pd.DataFrame()
 
         # Daily risk state
         self._daily_pnl: float = 0.0
@@ -245,35 +248,40 @@ class BacktestEngine:
         symbol = self.settings.default_symbol
         timeframe = self.settings.low_interval
 
-        print(f"[Engine] Loading {symbol} @ {timeframe}...")
-        data = self.data_lake.load(
-            symbol,
-            timeframe=timeframe,
-            start_date=self.start_date,
-            end_date=self.end_date,
-        )
-
-        if data.empty and timeframe != "1h":
-            print("[Engine] No data found; falling back to 1h.")
+        # Load data only if not injected via __init__
+        if self.data.empty:
+            print(f"[Engine] Loading {symbol} @ {timeframe}...")
             data = self.data_lake.load(
-                symbol, timeframe="1h",
+                symbol,
+                timeframe=timeframe,
                 start_date=self.start_date,
                 end_date=self.end_date,
             )
 
-        if data.empty:
-            print("[Engine] No data found. Aborting.")
-            return
+            if data.empty and timeframe != "1h":
+                print("[Engine] No data found; falling back to 1h.")
+                data = self.data_lake.load(
+                    symbol, timeframe="1h",
+                    start_date=self.start_date,
+                    end_date=self.end_date,
+                )
 
-        # Optional bar-type conversion (volume / range / heikin-ashi)
-        bar_type = self.settings.bar_type
-        bar_size = self.settings.bar_size
-        if bar_type != "time":
-            spec = self.settings.get_instrument_spec(symbol)
-            data = BarBuilder.build(data, bar_type, bar_size, spec["tick_size"])
-            print(f"[Engine] Converted to {bar_type.upper()} bars: {len(data):,} bars")
+            if data.empty:
+                print("[Engine] No data found. Aborting.")
+                return
 
-        self.data = data
+            # Optional bar-type conversion (volume / range / heikin-ashi)
+            bar_type = self.settings.bar_type
+            bar_size = self.settings.bar_size
+            if bar_type != "time":
+                spec = self.settings.get_instrument_spec(symbol)
+                data = BarBuilder.build(data, bar_type, bar_size, spec["tick_size"])
+                print(f"[Engine] Converted to {bar_type.upper()} bars: {len(data):,} bars")
+
+            self.data = data
+        else:
+            # Data was injected
+            data = self.data
         print(
             f"[Engine] {len(data):,} bars loaded "
             f"({data.index[0].date()} -> {data.index[-1].date()})."

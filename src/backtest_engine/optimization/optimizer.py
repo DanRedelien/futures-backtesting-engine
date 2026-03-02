@@ -9,6 +9,7 @@ import os
 import sys
 import optuna
 import numpy as np
+import pandas as pd
 from typing import Dict, Any, Optional, Type
 
 from ..engine import BacktestEngine
@@ -110,6 +111,7 @@ class OptunaOptimizer:
         params: Dict[str, Any],
         start_date=None,
         end_date=None,
+        data: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
         """
         Execute a single strategy backtest for optimisation scoring.
@@ -134,6 +136,7 @@ class OptunaOptimizer:
             start_date=start_date,
             end_date=end_date,
             settings=s,
+            data=data,
         )
 
         with _HiddenPrints():
@@ -258,8 +261,9 @@ class OptunaOptimizer:
     def optimize_on_slice(
         self,
         strategy_class: Type,
-        start_date,
-        end_date,
+        start_date=None,
+        end_date=None,
+        data: Optional[pd.DataFrame] = None,
         n_trials: Optional[int] = None,
         fold_id: int = 0,
     ) -> Dict[str, Any]:
@@ -268,8 +272,9 @@ class OptunaOptimizer:
 
         Args:
             strategy_class: Strategy class to optimize.
-            start_date: IS start date.
-            end_date: IS end date.
+            start_date: IS start date (optional).
+            end_date: IS end date (optional).
+            data: Pre-sliced dataframe for Dependency Injection mapping.
             n_trials: Number of Optuna trials.
             fold_id: Fold identifier for study naming.
 
@@ -284,7 +289,6 @@ class OptunaOptimizer:
             study_name=f"wfv_{strategy_class.__name__}_fold{fold_id}",
             direction="maximize",
             sampler=optuna.samplers.TPESampler(seed=42 + fold_id),
-            pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
         )
 
         def objective(trial):
@@ -300,6 +304,7 @@ class OptunaOptimizer:
                 strategy_class, params,
                 start_date=start_date,
                 end_date=end_date,
+                data=data,
             )
             stats = result["stats"]
 
@@ -316,7 +321,11 @@ class OptunaOptimizer:
 
         # Suppress Optuna logging during WFV
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        study.optimize(objective, n_trials=n_trials)
+        study.optimize(
+            objective, 
+            n_trials=n_trials,
+            show_progress_bar=True
+        )
         optuna.logging.set_verbosity(optuna.logging.INFO)
 
         if not study.best_trials:
@@ -342,8 +351,9 @@ class OptunaOptimizer:
         self,
         strategy_class: Type,
         params: Dict[str, Any],
-        start_date,
-        end_date,
+        start_date=None,
+        end_date=None,
+        data: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a strategy with fixed params on a date-bounded OOS slice.
@@ -361,6 +371,7 @@ class OptunaOptimizer:
             strategy_class, params,
             start_date=start_date,
             end_date=end_date,
+            data=data,
         )
         stats = result["stats"]
 

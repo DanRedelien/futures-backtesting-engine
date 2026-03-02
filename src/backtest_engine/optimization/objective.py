@@ -54,8 +54,8 @@ def objective_score(
     max_dd = stats.get("max_drawdown", 0.0)
 
     # ── 1. Hard rejection (Floor) ──────────────────────────────────
-    if trades < min_trades:
-        return -1.0  # Immediate kill — Optuna learns to avoid
+    # Note: Immediate kill (`return -1.0`) was removed. 
+    # Optuna elegantly handles this upstream via `raise optuna.TrialPruned`.
 
     # ── 2. Base score (blended risk-adjusted return) ───────────────
     base_score = SHARPE_WEIGHT * sharpe + SORTINO_WEIGHT * sortino

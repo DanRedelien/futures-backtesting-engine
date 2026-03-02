@@ -37,7 +37,7 @@ class BacktestSettings(BaseSettings):
     default_symbol: str = "YM"
 
     # ── Bar settings ───────────────────────────────────────────────────────────
-    low_interval: str = "5m"      # Base resolution used for data loading
+    low_interval: str = "30m"      # Base resolution used for data loading
     bar_type: str = "time"        # Options: "time", "volume", "range", "heikin_ashi"
     bar_size: float = 0.0         # Threshold for volume / range bar types
 
