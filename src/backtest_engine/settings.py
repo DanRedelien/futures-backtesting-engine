@@ -105,25 +105,16 @@ class BacktestSettings(BaseSettings):
         """Standard pacing delay to respect IB rate limits (~6 req/min)."""
         return 11.0
 
-    # ── Walk-Forward Optimizer scheduling ─────────────────────────────────────
-    # Phase 1 (Coarse Search)
-    wfo_coarse_months: int = 4       # Months of recent history for Phase 1
-    wfo_coarse_trials: int = 150     # Optuna trials for Phase 1
-
-    # Phase 2 (Full Fidelity)
-    wfo_top_k_candidates: int = 20   # Top Phase 1 trials promoted to Phase 2
-    wfo_final_top_k: int = 5         # Winners returned from Phase 2
-
-    # Phase 3 (Rolling Windows IS/OOS)
-    wfo_rolling_is_months: int = 6   # In-Sample window size
-    wfo_rolling_oos_months: int = 1  # Out-of-Sample window size
-    wfo_rolling_step_months: int = 1 # Window step (walk-forward stride)
-    wfo_rolling_trials: int = 30     # Local search trials per fold
+    # ── Walk-Forward Validation (WFV) scheduling ──────────────────────────────
+    wfo_n_folds: int = 5             # Number of walk-forward folds
+    wfo_test_size_pct: float = 0.15  # Fraction of total data used per test fold
+    wfo_n_trials: int = 500          # Optuna trials per fold
+    wfo_max_parameters: int = 9      # Strict maximum limit for optimized variables
 
     # Pruning / quality gates
     wfo_prune_min_trades: int = 10         # Minimum trades for a trial to pass
     wfo_prune_max_dd_pct: float = 30.0    # Max drawdown % before early pruning
-    wfo_prune_min_pnl: float = -10_000.0  # Minimum PnL before early pruning
+    wfo_prune_target_trades_mult: int = 5  # target_trades = min_trades * this
 
     # ── Path helpers ───────────────────────────────────────────────────────────
     def get_results_path(self) -> Path:

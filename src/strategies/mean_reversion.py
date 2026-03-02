@@ -189,12 +189,12 @@ class MeanReversionStrategy(BaseStrategy):
             "mr_rsi_window":      (7,  30,  1),
             "mr_rsi_oversold":    (20.0, 40.0, 5.0),
             "mr_rsi_overbought":  (60.0, 80.0, 5.0),
-            "mr_vol_min_pct":     (0.10, 0.40, 0.05),
-            "mr_vol_max_pct":     (0.60, 0.90, 0.05),
             "mr_trend_max_tstat": (1.0, 3.5, 0.25),
-            "mr_adf_window":      (24, 120, 12),
             "mr_atr_window":      (10,  40,  5),
             "mr_atr_sl_mult":     (1.5, 4.0, 0.5),
+            "mr_vol_min_pct":     (0.10, 0.50, 0.05),
+            "mr_vol_max_pct":     (0.50, 0.95, 0.05),
+            "mr_adf_max_pvalue":  (0.01, 0.15, 0.01),
         }
 
     # ── Event hook ─────────────────────────────────────────────────────────────

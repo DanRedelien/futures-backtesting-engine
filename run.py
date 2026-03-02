@@ -2,11 +2,15 @@
 Entry point for the Single-Asset Backtesting Engine.
 
 Usage:
-  python run.py --download ES NQ RTY YM CL GC SI NG ZC PL
+  python run.py --download GC ES NQ RTY YM CL SI
   python run.py --backtest --strategy sma
   python run.py --backtest --strategy mean_rev
+  python run.py --backtest --strategy ict_ob
+  python run.py --backtest --strategy zscore
   python run.py --wfo --strategy sma
   python run.py --wfo --strategy mean_rev
+  python run.py --wfo --strategy ict_ob
+  python run.py --wfo --strategy zscore
 """
 
 import argparse
@@ -22,7 +26,7 @@ def _load_strategy(name: str):
     Returns the strategy class for the given short name.
 
     Args:
-        name: Strategy identifier ('sma' or 'mean_rev').
+        name: Strategy identifier ('sma', 'mean_rev', 'ict_ob', or 'zscore').
 
     Returns:
         Strategy class (subclass of BaseStrategy).
@@ -30,6 +34,8 @@ def _load_strategy(name: str):
     registry = {
         "sma":      "src.strategies.sma_crossover:SmaCrossoverStrategy",
         "mean_rev": "src.strategies.mean_reversion:MeanReversionStrategy",
+        "ict_ob":   "src.strategies.ict_order_block:IctOrderBlockStrategy",
+        "zscore":   "src.strategies.zscore_reversal:ZScoreReversalStrategy",
     }
 
     if name not in registry:
@@ -55,11 +61,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--wfo", action="store_true",
-        help="Run Walk-Forward Optimisation (all 3 phases) for the selected strategy",
+        help="Run Walk-Forward Validation (WFV) with Skeptic analysis for the selected strategy",
     )
     parser.add_argument(
         "--strategy", type=str, default="sma",
-        help="Strategy to use: 'sma' (default) or 'mean_rev'",
+        help="Strategy to use: 'sma', 'mean_rev', 'ict_ob', or 'zscore'",
     )
     args = parser.parse_args()
 
@@ -96,17 +102,18 @@ if __name__ == "__main__":
         engine.run(strategy_class)
         engine.show_results()
 
-    # ── Walk-Forward Optimisation ──────────────────────────────────────────────
+    # ── Walk-Forward Validation ─────────────────────────────────────────────────
     if args.wfo:
-        from src.backtest_engine.wfo_engine import WFOEngine
+        from src.backtest_engine.optimization.wfv_optimizer import WalkForwardOptimizer
 
         strategy_class = _load_strategy(args.strategy)
 
         print("=" * 60)
-        print(f"  WFO: {strategy_class.__name__}")
+        print(f"  WFV: {strategy_class.__name__}")
         print(f"  Symbol   : {settings.default_symbol}")
         print(f"  Timeframe: {settings.low_interval}")
         print("=" * 60)
 
-        wfo = WFOEngine(strategy_class=strategy_class, settings=settings)
-        wfo.run_coarse_search(n_trials=settings.wfo_coarse_trials)
+        wfv = WalkForwardOptimizer(settings=settings)
+        wfv.run(strategy_class=strategy_class)
+
