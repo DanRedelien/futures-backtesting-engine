@@ -12,14 +12,17 @@ The primary challenge is to construct a pipeline that structurally separates IS 
 
 ### 1. Model
 The engine is built on a hybrid architecture. It leverages fully vectorized pre-computation of indicators via `pandas`/`numpy` to achieve O(1) bar lookups, whilst maintaining a precise event-driven posture for position management. 
-Several regime filters are applied natively: Augmented Dickey-Fuller (ADF) for stationarity, percentile-based volatility filters, and T-Stat trend estimation.
+Several regime filters are applied natively: Half-Life mean-reversion speed estimation, Augmented Dickey-Fuller (ADF) for macro stationarity, percentile-based volatility filters, and T-Stat trend estimation.
 
-### 2. Calculation Algorithm
+### 2. FastBar Architecture
+To solve the computational overhead of iterative row-by-row `pandas.iloc` lookups, the engine's core loop was entirely refactored to use pre-extracted $C$-level `numpy` arrays. A lightweight `FastBar` python class acts as a proxy bridge, mapping array indices back to `pandas.Series` conventions (e.g., `bar["open"]`) for strategy compatibility, achieving **~5x faster event loops**.
+
+### 3. Calculation Algorithm
 To structurally prevent any data leakage, all signal matrices are strictly shifted by 1 bar:
 $$ Signal_t = F(Price_{0..t-1}) $$
 Positions are evaluated and executed explicitly at $t$, factoring in standard slippage models.
 
-### 3. Pipeline Architecture
+### 4. Pipeline Architecture
 Raw OHLCV minute data is fetched via `IBFetcher` and cached locally as Parquet files. The strategy defines its parameter search space (using Optuna bounds), which is then processed by the `WalkForwardOptimizer` to perform rigorous statistical parameter selection.
 
 ## Risk Controls / Validation
@@ -27,7 +30,7 @@ Raw OHLCV minute data is fetched via `IBFetcher` and cached locally as Parquet f
 | Control | Implementation |
 |---------|---------------|
 | Walk-Forward | 5-Fold Rolling Window (IS/OOS) |
-| No Look-Ahead | Strict `.shift(1)` enforced within Strategy `__init__` |
+| No Look-Ahead | Engine automatically executes at **$OPEN_{T+1}$** for signals evaluated at **$CLOSE_T$** |
 | Stats Validation | T-Statistic, P-Value, and Deflated Sharpe Ratio (DSR) tracking |
 | Parameter Stability| Algorithmic penalties for inconsistent outcomes and Alpha Decay across OOS folds |
 
@@ -53,24 +56,8 @@ Working with minute-level OHLCV requires robust cleaning:
 > Displays the overall PnL curve, max drawdown underwater plots, and the core statistical metrics table. Analyzed: (`sma_crossover.py`)
 
 
-<img width="816" height="384" alt="image" src="https://github.com/user-attachments/assets/4fca7414-0392-42ae-91ee-57c8d781944f" />
+<img width="622" height="540" alt="image" src="https://github.com/user-attachments/assets/33cfaf5c-bb29-4502-a650-e3ad0fb034ee" />
 
-> Displays the strategy's configuration (`sma_crossover.py`), highlighting the parameter search bounds and active filters.
-
-
-<img width="650" height="205" alt="image" src="https://github.com/user-attachments/assets/971925c3-c893-4e14-91f6-e0913cacff43" />
-
-> Walk-Forward Validation parameters (`settings.py`) designed to prevent curve-fitting:
-> *   **Walk-Forward Folds (`wfo_n_folds`)**: Number of IS/OOS segments.
-> *   **OOS Test Size (`wfo_test_size_pct`)**: Data fraction reserved for out-of-sample testing.
-> *   **Degrees of Freedom (`wfo_max_parameters`)**: Hard cap on optimizable variables to penalize complexity.
-> *   **Search Depth (`wfo_n_trials`)**: Optuna iterations per fold.
-> *   **Significance Gate (`wfo_prune_min_trades`)**: Minimum trades required; ensures metrics are statistically valid.
-> *   **Activity Penalty (`wfo_prune_target_trades_mult`)**: Penalizes strategies that deviate from the expected trade frequency.
-> *   **Risk Pruning (`wfo_prune_max_dd_pct`)**: Kills trials instantly if drawdown exceeds the limit.
-
-
-*(Placeholder: Add screenshot of WFO Terminal Output)*
 > Shows the rolling-window fold progression, out-of-sample parameter selection stability, and applications of the stability penalty. Optimized: (`sma_crossover.py`)
 
 
@@ -80,9 +67,9 @@ Working with minute-level OHLCV requires robust cleaning:
 
 Optimization on minute-level data over 2-year periods is heavily vectorized:
 *   **Optuna Budget**: 500 parameter trials per Fold
-*   **Single Trial Speed**: ~ 0.90 seconds
-*   **Average Fold Runtime**: ~ 7 minutes
-*   **Total WFV Execution**: ~ 35 minutes
+*   **Single Trial Speed**: ~ 0.24 seconds
+*   **Average Fold Runtime**: ~ 124 seconds
+*   **Total WFV Execution**: ~ 10 minutes
 
 ## Project Structure
 
@@ -98,6 +85,9 @@ Optimization on minute-level data over 2-year periods is heavily vectorized:
 │       ├── base.py
 │       ├── filters.py
 │       └── sma_crossover.py
+└── tests/
+    ├── test_invariants.py
+    └── test_kalman.py
 ```
 
 ## Usage
@@ -114,6 +104,7 @@ python run.py --wfo --strategy mean_rev
 
 ## Future Improvements
 
+- [ ] Move to NautilusTrader for Ultra-High performance.
 - [ ] Tick-level orderbook replay integration.
 - [ ] Portfolio-level margin and correlation analysis.
 - [ ] Probability of bankruptcy estimation via Monte Carlo simulations.

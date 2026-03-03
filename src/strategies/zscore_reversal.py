@@ -14,8 +14,8 @@ Methodology:
     - Directional Bias   : Long-term SMA. Trade shorts only below SMA, longs above SMA.
     - Volatility Regime  : Blocks entries during dead/compression or panic/expansion regimes.
     - Trend T-Stat       : Blocks mean reversion when a strong directional trend is detected.
-    - Stationarity (ADF) : Blocks mean reversion when the ADF test indicates a non-stationary
-                           (unit root) regime, meaning standard mean-reversion edges vanish.
+    - Stationarity (Half-Life) : Blocks mean reversion when the mean-reverting speed
+                           (Half-Life) is too slow, meaning poor capital efficiency.
 
 All indicators are pre-computed on the full dataset during __init__ and
 accessed via a .get(timestamp) lookup in on_bar() — zero look-ahead bias.
@@ -32,7 +32,7 @@ import pandas as pd
 
 from src.backtest_engine.execution import Order
 from src.strategies.base import BaseStrategy
-from src.strategies.filters import ADFFilter, TrendFilter, VolatilityRegimeFilter
+from src.strategies.filters import HalfLifeFilter, TrendFilter, VolatilityRegimeFilter
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -78,45 +78,48 @@ class ZScoreReversalConfig:
     vol_min_pct        : Minimum vol percentile (blocks dead markets).
     vol_max_pct        : Maximum vol percentile (blocks panic markets).
 
-    ADF Stationarity Filter
-    ───────────────────────
-    use_adf_filter     : Enable/disable the Augmented Dickey-Fuller stationarity check.
-    adf_window         : Number of resampled bars used for the test.
-    adf_timeframe      : Resample frequency (default '1h').
-    adf_max_pvalue     : Maximum acceptable p-value for stationarity. If > max, market is trending.
+    Half-Life Filter
+    ────────────────
+    use_hl_filter       : Enable/disable the Half-Life mean-reverting speed check.
+    hl_window           : Window for rolling regression.
+    hl_baseline         : Baseline mean-reverting speed target value (e.g. 5.0 bars).
+    hl_multiplier       : Block entries if speed > baseline * multiplier.
+    hl_max_holding_mult : Exit trade early if held for more than entry_hl * max_holding_mult.
+
     """
     # ── Signal generation ──────────────────────────────────────────────────────
-    zscore_window: int = 20
-    zscore_entry_lvl: float = 2.0
+    zscore_window: int = 50
+    zscore_entry_lvl: float = 1.5
 
     # ── Risk management ────────────────────────────────────────────────────────
     atr_window: int = 14
-    atr_sl_mult: float = 1.0
-    atr_tp_mult: float = 2.0
+    atr_sl_mult: float = 2.0
+    atr_tp_mult: float = 5.0
 
     # ── Direction ──────────────────────────────────────────────────────────────
     trade_direction: str = "both"
 
     # ── Trend SMA bias ─────────────────────────────────────────────────────────
-    trend_sma_window: Optional[int] = 1000
+    trend_sma_window: Optional[int] = 3200
 
     # ── T-stat trend filter ────────────────────────────────────────────────────
     use_trend_filter: bool = True
     trend_window: int = 100
-    trend_max_tstat: float = 1.2
+    trend_max_tstat: float = 2.75
 
     # ── Volatility regime filter ───────────────────────────────────────────────
     use_vol_filter: bool = True
     vol_regime_window: int = 50
     vol_history_window: int = 500
-    vol_min_pct: float = 0.20
-    vol_max_pct: float = 0.80
+    vol_min_pct: float = 0.15
+    vol_max_pct: float = 0.85
 
-    # ── ADF Stationarity filter ────────────────────────────────────────────────
-    use_adf_filter: bool = False
-    adf_window: int = 72
-    adf_timeframe: str = "1h"
-    adf_max_pvalue: float = 0.05
+    # ── Half-Life filter ───────────────────────────────────────────────────────
+    use_hl_filter: bool = True
+    hl_window: int = 100
+    hl_baseline: float = 5.0
+    hl_multiplier: float = 2.0
+    hl_max_holding_mult: float = 2.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -167,16 +170,16 @@ class ZScoreReversalStrategy(BaseStrategy):
         ).max(axis=1)
         atr = tr.ewm(span=cfg.atr_window, adjust=False).mean()
 
-        # Shift by 1 → strategy sees previous bar's data only
-        self._zscore: pd.Series = zscore.shift(1)
-        self._atr:    pd.Series = atr.shift(1)
-        self._close:  pd.Series = close.shift(1)
+        # Indicators are looked up directly from the closing bar's timestamp.
+        self._zscore: pd.Series = zscore
+        self._atr:    pd.Series = atr
+        self._close:  pd.Series = close
 
         # ── Trend SMA ──────────────────────────────────────────────────────────
         self._trend_sma: Optional[pd.Series] = None
         if cfg.trend_sma_window is not None:
             ts = close.rolling(window=cfg.trend_sma_window, min_periods=cfg.trend_sma_window // 2).mean()
-            self._trend_sma = ts.shift(1)
+            self._trend_sma = ts
             print(f"[Z-SCORE] TrendBias SMA enabled (window={cfg.trend_sma_window})")
 
         # ── Volatility regime filter ───────────────────────────────────────────
@@ -201,22 +204,25 @@ class ZScoreReversalStrategy(BaseStrategy):
             )
             print(f"[Z-SCORE] TrendFilter enabled (window={cfg.trend_window}, max_tstat={cfg.trend_max_tstat})")
 
-        # ── ADF filter ─────────────────────────────────────────────────────────
-        self._adf_filter: Optional[ADFFilter] = None
-        if cfg.use_adf_filter:
-            self._adf_filter = ADFFilter(
+        # ── Half-Life filter ───────────────────────────────────────────────────
+        self._hl_filter: Optional[HalfLifeFilter] = None
+        if cfg.use_hl_filter:
+            self._hl_filter = HalfLifeFilter(
                 series=close,
-                adf_window=cfg.adf_window,
-                timeframe=cfg.adf_timeframe,
-                max_pvalue=cfg.adf_max_pvalue,
+                window=cfg.hl_window,
+                max_half_life=cfg.hl_baseline * cfg.hl_multiplier,
+                lambda_min=getattr(engine.settings, "hl_lambda_min", 1e-4),
+                max_cap=getattr(engine.settings, "hl_max_cap", 500.0),
             )
-            print(f"[Z-SCORE] ADFFilter enabled (window={cfg.adf_window}, tf={cfg.adf_timeframe}, max_p={cfg.adf_max_pvalue})")
+            print(f"[Z-SCORE] HalfLifeFilter enabled (window={cfg.hl_window}, max_hl={cfg.hl_baseline * cfg.hl_multiplier})")
 
         # ── State ──────────────────────────────────────────────────────────────
         self._invested: bool = False
         self._position_side: Optional[str] = None
         self._sl_price: float = 0.0
         self._tp_price: float = 0.0
+        self._bars_held: int = 0
+        self._entry_hl: float = 0.0
         
         self._zscore_entry_lvl = cfg.zscore_entry_lvl
 
@@ -241,7 +247,8 @@ class ZScoreReversalStrategy(BaseStrategy):
             "zscore_trend_max_tstat":    (1.0, 3.0, 0.25),
             "zscore_vol_min_pct":        (0.10, 0.40, 0.05),
             "zscore_vol_max_pct":        (0.60, 0.90, 0.05),
-            "zscore_adf_max_pvalue":     (0.01, 0.15, 0.02),
+            "zscore_hl_baseline":        (2.0, 10.0, 1.0),
+            "zscore_hl_multiplier":      (1.0, 4.0, 0.5),
         }
 
     # ── Main event hook ────────────────────────────────────────────────────────
@@ -270,6 +277,17 @@ class ZScoreReversalStrategy(BaseStrategy):
 
         # ── In position: manage SL / TP exits ─────────────────────────────────
         if self._invested:
+            self._bars_held += 1
+            
+            # Time stop based on Half-Life
+            if self._bars_held > (self._entry_hl * self.config.hl_max_holding_mult):
+                orders.append(
+                    self.market_order("SELL" if self._position_side == "LONG" else "BUY", 
+                                      self.settings.fixed_qty, reason="TIME_STOP")
+                )
+                self._reset_state()
+                return orders
+
             if self._position_side == "LONG":
                 if c_low <= self._sl_price or c_high >= self._tp_price:
                     reason = "STOP_LOSS" if c_low <= self._sl_price else "TAKE_PROFIT"
@@ -305,6 +323,8 @@ class ZScoreReversalStrategy(BaseStrategy):
                     self._position_side = "LONG"
                     self._sl_price      = c_close - sl_dist
                     self._tp_price      = c_close + tp_dist
+                    self._bars_held     = 0
+                    self._entry_hl      = self._hl_filter.get(timestamp, self.config.hl_baseline) if self._hl_filter else self.config.hl_baseline
                     
                     orders.append(
                         self.market_order("BUY", self.settings.fixed_qty, reason="Z_LONG")
@@ -318,6 +338,8 @@ class ZScoreReversalStrategy(BaseStrategy):
                     self._position_side = "SHORT"
                     self._sl_price      = c_close + sl_dist
                     self._tp_price      = c_close - tp_dist
+                    self._bars_held     = 0
+                    self._entry_hl      = self._hl_filter.get(timestamp, self.config.hl_baseline) if self._hl_filter else self.config.hl_baseline
                     
                     orders.append(
                         self.market_order("SELL", self.settings.fixed_qty, reason="Z_SHORT")
@@ -350,8 +372,8 @@ class ZScoreReversalStrategy(BaseStrategy):
         if self._trend_filter and not self._trend_filter.is_allowed(timestamp):
             return False
             
-        # ── ADF Stationarity filter ───────────────────────────────────────────
-        if self._adf_filter and not self._adf_filter.is_allowed(timestamp):
+        # ── Half-Life filter ──────────────────────────────────────────────────
+        if self._hl_filter and not self._hl_filter.is_allowed(timestamp):
             return False
 
         # ── Directional bias via long-term SMA ───────────────────────────────
@@ -375,3 +397,5 @@ class ZScoreReversalStrategy(BaseStrategy):
         self._position_side  = None
         self._sl_price       = 0.0
         self._tp_price       = 0.0
+        self._bars_held      = 0
+        self._entry_hl       = 0.0

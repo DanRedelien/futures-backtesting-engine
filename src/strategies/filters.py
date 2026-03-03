@@ -11,6 +11,7 @@ VolatilityRegimeFilter  — blocks entries in low/high volatility regimes.
 TrendFilter             — blocks mean-reversion entries during strong trends.
 ADFFilter               — verifies stationarity of any price / spread series.
 KalmanBeta              — Numba-compiled dynamic hedge-ratio estimator.
+HalfLifeFilter          — estimates OU mean-reversion speed parameter.
 """
 
 from __future__ import annotations
@@ -142,9 +143,13 @@ class VolatilityRegimeFilter:
         Returns:
             True if regime percentile is within [min_pct, max_pct].
         """
-        pct = self._pct.get(timestamp, np.nan)
-        if np.isnan(pct):
+        try:
+            pct = self._pct.at[timestamp]
+        except KeyError:
             return True  # No data yet → do not restrict
+            
+        if np.isnan(pct):
+            return True
         return self.min_pct <= pct <= self.max_pct
 
     def as_series(self) -> pd.Series:
@@ -204,7 +209,11 @@ class TrendFilter:
         Returns:
             True if |T-stat| < max_t_stat (weak trend → mean-reversion viable).
         """
-        t = self._t_stat.get(timestamp, np.nan)
+        try:
+            t = self._t_stat.at[timestamp]
+        except KeyError:
+            return True
+            
         if np.isnan(t):
             return True
         return abs(t) < self.max_t_stat
@@ -274,9 +283,13 @@ class ADFFilter:
         Returns:
             True if ADF p-value < max_pvalue (reject unit root → stationary).
         """
-        pval = self._pvalue.get(timestamp, np.nan)
-        if np.isnan(pval):
+        try:
+            pval = self._pvalue.at[timestamp]
+        except KeyError:
             return False  # No result yet → block by default (conservative)
+            
+        if np.isnan(pval):
+            return False
         return pval < self.max_pvalue
 
     def as_series(self) -> pd.Series:
@@ -329,9 +342,121 @@ class KalmanBeta:
         Returns:
             Float beta (hedge ratio).
         """
-        val = self._beta.get(timestamp, np.nan)
+        try:
+            val = self._beta.at[timestamp]
+        except KeyError:
+            return default
+            
         return default if np.isnan(val) else float(val)
 
     def as_series(self) -> pd.Series:
         """Returns the full beta Series for inspection or plotting."""
         return self._beta
+
+
+class HalfLifeFilter:
+    """
+    Estimates the Half-Life of mean reversion for a price or spread series.
+
+    Methodology:
+        Fits a rolling OLS regression of the series differences (Δy) against
+        its lagged values (y_{t-1}) to estimate the Ornstein-Uhlenbeck mean-reversion
+        speed parameter (λ). 
+        The half-life is then calculated as -ln(2) / λ.
+
+    Returns `is_allowed = True` when the estimated Half-Life is positive and 
+    less than or equal to `max_half_life`, indicating a reasonably fast mean-reverting regime.
+    """
+
+    def __init__(
+        self,
+        series: pd.Series,
+        window: int = 100,
+        max_half_life: float = 50.0,
+        lambda_min: Optional[float] = 1e-4,
+        max_cap: Optional[float] = 500.0,
+    ) -> None:
+        """
+        Args:
+            series: Price or spread Series indexed by bar timestamp.
+            window: Rolling regression window in bars.
+            max_half_life: Maximum accepted half-life to allow trading.
+            lambda_min: Minimum mean-reverting speed to consider the series stationary.
+            max_cap: Hard cap limit for calculated Half-Life to prevent explosion.
+        """
+        self.max_half_life = max_half_life
+        self.lambda_min = lambda_min
+        self.max_cap = max_cap
+        
+        y_lag = series.shift(1)
+        dy = series - y_lag
+        
+        # Calculate trailing variance of X and covariance of X and Y
+        var_x = y_lag.rolling(window=window, min_periods=window // 2).var()
+        cov_xy = y_lag.rolling(window=window, min_periods=window // 2).cov(dy)
+        
+        # Calculate slope directly. Replace inf values from division-by-zero with NaN.
+        slope = cov_xy / var_x
+        slope = slope.replace([np.inf, -np.inf], np.nan)
+        
+        # Calculate Half-Life
+        half_life = pd.Series(np.nan, index=series.index)
+        
+        # Only valid where slope is strictly negative and below lambda bounds
+        # (e.g., if lambda_min = 1e-4, we need slope < -1e-4)
+        if self.lambda_min is not None:
+            valid_idx = slope < -abs(self.lambda_min)
+        else:
+            valid_idx = slope < -1e-8
+        
+        # Calculate and hard-cap the value to prevent extreme numbers crashing downstream logic
+        raw_hl = -np.log(2) / slope[valid_idx]
+        if self.max_cap is not None:
+            half_life[valid_idx] = np.minimum(raw_hl, self.max_cap)
+        else:
+            half_life[valid_idx] = raw_hl
+        
+        # Shift prevents look-ahead bias
+        self._half_life: pd.Series = half_life.shift(1)
+
+    def is_allowed(self, timestamp) -> bool:
+        """
+        Returns True when the Half-Life is defined and reasonably short.
+
+        Args:
+            timestamp: Current bar index value.
+
+        Returns:
+            True if 0 < Half-Life <= max_half_life.
+        """
+        try:
+            hl = self._half_life.at[timestamp]
+        except KeyError:
+            return False  # No valid half-life -> block entry
+            
+        if np.isnan(hl):
+            return False
+            
+        return 0 < hl <= self.max_half_life
+
+    def get(self, timestamp, default: float = np.nan) -> float:
+        """
+        Returns the raw half-life estimate.
+        
+        Args:
+            timestamp: Current bar index value.
+            default: Fallback value when no estimate is available.
+            
+        Returns:
+            Float half-life or default.
+        """
+        try:
+            hl = self._half_life.at[timestamp]
+        except KeyError:
+            return default
+            
+        return float(hl) if not np.isnan(hl) else default
+
+    def as_series(self) -> pd.Series:
+        """Returns the raw Half-Life Series for inspection."""
+        return self._half_life

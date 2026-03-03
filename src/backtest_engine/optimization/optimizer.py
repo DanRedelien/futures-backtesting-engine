@@ -112,6 +112,7 @@ class OptunaOptimizer:
         start_date=None,
         end_date=None,
         data: Optional[pd.DataFrame] = None,
+        step_callback=None,
     ) -> Dict[str, Any]:
         """
         Execute a single strategy backtest for optimisation scoring.
@@ -139,7 +140,7 @@ class OptunaOptimizer:
         )
 
         with _HiddenPrints():
-            engine.run(strategy_class)
+            engine.run(strategy_class, step_callback=step_callback)
 
         # Extract metrics
         history = engine.portfolio.get_history_df()
@@ -216,8 +217,23 @@ class OptunaOptimizer:
         print(f"\n[OPT] Optimizing {strategy_class.__name__} for {n_trials} trials...")
 
         def objective(trial):
+            
+            def prune_callback(engine_ref, c_date, step, total):
+                # Report status to Optuna ~10 times per backtest run
+                check_interval = max(total // 10, 1)
+                if step % check_interval == 0:
+                    # Provide an intermediate value (e.g., current PnL or total total_value)
+                    current_value = engine_ref.portfolio.total_value
+                    trial.report(current_value, step)
+                    if trial.should_prune():
+                        raise optuna.TrialPruned("Pruned by Optuna intermediate check")
+
             params = self._apply_params(trial, search_space)
-            result = self._run_strategy(strategy_class, params)
+            result = self._run_strategy(
+                strategy_class, 
+                params,
+                step_callback=prune_callback
+            )
             stats = result["stats"]
 
             min_trades = self.settings.wfo_prune_min_trades
@@ -299,11 +315,20 @@ class OptunaOptimizer:
             except ValidationException as e:
                 raise optuna.TrialPruned(str(e))
 
+            def prune_callback(engine_ref, c_date, step, total):
+                check_interval = max(total // 10, 1)
+                if step > 0 and step % check_interval == 0:
+                    current_value = engine_ref.portfolio.total_value
+                    trial.report(current_value, step)
+                    if trial.should_prune():
+                        raise optuna.TrialPruned("Pruned by WFV Optuna check")
+
             result = self._run_strategy(
                 strategy_class, params,
                 start_date=start_date,
                 end_date=end_date,
                 data=data,
+                step_callback=prune_callback
             )
             stats = result["stats"]
 
@@ -342,7 +367,7 @@ class OptunaOptimizer:
         return {
             "best_params": study.best_params,
             "best_score": study.best_trial.value,
-            "n_trials": len(trial_values),
+            "n_trials": len(study.trials),
             "trial_std": trial_std,
         }
 

@@ -27,9 +27,11 @@ class BaseStrategy(ABC):
         The engine calls on_bar() once per bar after filling any pending
         orders.  Strategies should pre-compute all indicators during
         __init__ via vectorised pandas/numpy operations on the full
-        dataset, then shift the resulting Series by one bar to guarantee
-        zero look-ahead bias.  on_bar() simply performs an O(1)
+        dataset. on_bar() simply performs an O(1)
         dictionary lookup against those pre-computed arrays.
+        (Note: Do NOT shift indicators by 1. The engine naturally executes
+        generated orders at the NEXT bar's Open, providing realistic 1-bar 
+        execution lag without lookahead bias).
 
     Required:
         on_bar() — return a list of Orders (may be empty).

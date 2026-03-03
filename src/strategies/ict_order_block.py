@@ -180,12 +180,11 @@ class IctOrderBlockStrategy(BaseStrategy):
         ).max(axis=1)
         atr = tr.ewm(span=cfg.atr_window, adjust=False).mean()
 
-        # Shift by 1 → strategy sees previous bar's indicators only
-        self._atr:   pd.Series = atr.shift(1)
-        self._open:  pd.Series = open_.shift(1)
-        self._high:  pd.Series = high.shift(1)
-        self._low:   pd.Series = low.shift(1)
-        self._close: pd.Series = close.shift(1)
+        self._atr:   pd.Series = atr
+        self._open:  pd.Series = open_
+        self._high:  pd.Series = high
+        self._low:   pd.Series = low
+        self._close: pd.Series = close
 
         # Raw (unshifted) OHLC arrays used to detect OB formation on the
         # *previous* two bars.  We shift by 1 for the "current" bar and by 2/3
@@ -208,7 +207,7 @@ class IctOrderBlockStrategy(BaseStrategy):
                 window=cfg.trend_sma_window,
                 min_periods=cfg.trend_sma_window
             ).mean()
-            self._trend_sma = ts.shift(1)
+            self._trend_sma = ts
             print(
                 f"[ICT_OB] TrendBias SMA enabled "
                 f"(window={cfg.trend_sma_window}) — LONG above, SHORT below"
@@ -284,8 +283,9 @@ class IctOrderBlockStrategy(BaseStrategy):
 
     def on_bar(self, bar: pd.Series) -> List[Order]:
         """
-        Called once per bar.  All data accesses use the shifted (lag-1) series
-        so the strategy observes only information available at bar open.
+        Called once per bar at the bar's Close. The engine executes generated
+        orders at the Open of the *next* bar, guaranteeing a natural 1-bar
+        execution delay without look-ahead bias.
 
         Args:
             bar: Current OHLCV bar; bar.name is the timestamp.
@@ -332,8 +332,8 @@ class IctOrderBlockStrategy(BaseStrategy):
                     return orders
 
         # ── Detect new order blocks on previous bars ───────────────────────────
-        # We look at bars [idx-3, idx-2, idx-1] (all shifted by 1 already in
-        # the raw series so bar_idx-1 == the candle that just closed).
+        # We look at bars [idx-2, idx-1, idx] to form C1, C2, and C3.
+        # bar_idx == the candle that just closed.
         self._try_detect_ob(bar_idx, atr_val)
 
         # Expire stale order blocks
@@ -412,30 +412,29 @@ class IctOrderBlockStrategy(BaseStrategy):
 
     def _try_detect_ob(self, bar_idx: int, atr_val: float) -> None:
         """
-        Inspects the three most recent *fully closed* bars (lag 1, 2, 3)
+        Inspects the three most recent *fully closed* bars (lag 0, 1, 2)
         to decide if a new order block has formed.
 
-        All accesses use .iloc on the shifted raw series so there is no
-        look-ahead — bar_idx in the raw series equals the bar that JUST
-        closed (C3 is bar_idx-1, C2 is bar_idx-2, C1 is bar_idx-3).
+        All accesses use .iloc so there is no
+        look-ahead — bar_idx equals the bar that JUST
+        closed (C3 is bar_idx, C2 is bar_idx-1, C1 is bar_idx-2).
 
         A new OB overwrites a pending one only if it is in the same
         direction or there is no pending OB yet.
         """
         cfg = self.config
 
-        # Pull OHLC for C1 / C2 / C3 from the unshifted (raw) series
-        # We use iloc on the raw series; the raw series has no shift applied.
+        # Pull OHLC for C1 / C2 / C3
         close_raw = self._close_raw
         open_raw  = self._open_raw
         high_raw  = self._high_raw
         low_raw   = self._low_raw
 
-        # bar_idx corresponds to the bar that on_bar() is currently processing.
-        # bar_idx - 1 == last closed bar (C3), -2 == C2, -3 == C1.
-        c3_idx = bar_idx - 1
-        c2_idx = bar_idx - 2
-        c1_idx = bar_idx - 3
+        # bar_idx corresponds to the bar that on_bar() is currently processing (just closed).
+        # bar_idx == C3, -1 == C2, -2 == C1.
+        c3_idx = bar_idx
+        c2_idx = bar_idx - 1
+        c1_idx = bar_idx - 2
 
         if c1_idx < 0:
             return

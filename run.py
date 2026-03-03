@@ -3,14 +3,20 @@ Entry point for the Single-Asset Backtesting Engine.
 
 Usage:
   python run.py --download GC ES NQ RTY YM CL SI
+
   python run.py --backtest --strategy sma
   python run.py --backtest --strategy mean_rev
   python run.py --backtest --strategy ict_ob
   python run.py --backtest --strategy zscore
+  python run.py --backtest --strategy sma_pullback
+  python run.py --backtest --strategy intraday_momentum
+  
   python run.py --wfo --strategy sma
   python run.py --wfo --strategy mean_rev
   python run.py --wfo --strategy ict_ob
   python run.py --wfo --strategy zscore
+  python run.py --wfo --strategy sma_pullback
+  python run.py --wfo --strategy intraday_momentum
 """
 
 import argparse
@@ -26,16 +32,18 @@ def _load_strategy(name: str):
     Returns the strategy class for the given short name.
 
     Args:
-        name: Strategy identifier ('sma', 'mean_rev', 'ict_ob', or 'zscore').
+        name: Strategy identifier ('sma', 'mean_rev', 'ict_ob', 'zscore', 'sma_pullback', or 'intraday_momentum').
 
     Returns:
         Strategy class (subclass of BaseStrategy).
     """
     registry = {
-        "sma":      "src.strategies.sma_crossover:SmaCrossoverStrategy",
-        "mean_rev": "src.strategies.mean_reversion:MeanReversionStrategy",
-        "ict_ob":   "src.strategies.ict_order_block:IctOrderBlockStrategy",
-        "zscore":   "src.strategies.zscore_reversal:ZScoreReversalStrategy",
+        "sma":               "src.strategies.sma_crossover:SmaCrossoverStrategy",
+        "mean_rev":          "src.strategies.mean_reversion:MeanReversionStrategy",
+        "ict_ob":            "src.strategies.ict_order_block:IctOrderBlockStrategy",
+        "zscore":            "src.strategies.zscore_reversal:ZScoreReversalStrategy",
+        "sma_pullback":      "src.strategies.sma_pullback:SmaPullbackStrategy",
+        "intraday_momentum": "src.strategies.intraday_momentum:IntradayMomentumStrategy",
     }
 
     if name not in registry:
@@ -65,7 +73,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--strategy", type=str, default="sma",
-        help="Strategy to use: 'sma', 'mean_rev', 'ict_ob', or 'zscore'",
+        help="Strategy to use: 'sma', 'mean_rev', 'ict_ob', 'zscore', 'sma_pullback', or 'intraday_momentum'",
     )
     args = parser.parse_args()
 

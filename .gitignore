@@ -17,6 +17,7 @@ venv.bak/
 results/
 #cache/
 *.log
+__pycache__/
 
 # IDEs
 .idea/

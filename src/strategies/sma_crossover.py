@@ -24,7 +24,7 @@ import pandas as pd
 
 from src.backtest_engine.execution import Order
 from src.strategies.base import BaseStrategy
-from src.strategies.filters import TrendFilter, VolatilityRegimeFilter
+from src.strategies.filters import HalfLifeFilter, TrendFilter, VolatilityRegimeFilter
 
 
 @dataclass
@@ -69,6 +69,12 @@ class SmaCrossoverConfig:
     trend_min_tstat: float = 1.25   # Minimum T-stat to enter (we only want real, meaningful crossovers)
 
     trend_sma_window: Optional[int] = 900  # Long-term bias SMA. None = disabled
+
+    # ── Half-Life Time Stop ────────────────────────────────────────────────────
+    use_hl_filter: bool = False     # Use Ornstein-Uhlenbeck Half-Life for time stops
+    hl_window: int = 100           # Window for the test
+    hl_baseline: float = 5.0       # Fallback max half-life baseline
+    hl_max_holding_mult: float = 3.0 # Exit early if holding for longer than max_holding_mult * HL
 
     trade_direction: str = "both"           # Allowed directions: "both", "long", "short"
 
@@ -124,17 +130,17 @@ class SmaCrossoverStrategy(BaseStrategy):
         ).max(axis=1)
         atr = tr.ewm(span=cfg.atr_window, adjust=False).mean()
 
-        # Shift all indicators by 1 bar to remove look-ahead bias
-        self._signal: pd.Series        = regime_signal.shift(1)    # Used for reversal exit check
-        self._crossover: pd.Series     = crossover_signal.shift(1) # Used for fresh entry trigger
-        self._atr: pd.Series           = atr.shift(1)
-        self._close: pd.Series         = close.shift(1)
+        # Store indicators (engines executes at T+1 Open, no need to shift)
+        self._signal: pd.Series        = regime_signal    # Used for reversal exit check
+        self._crossover: pd.Series     = crossover_signal # Used for fresh entry trigger
+        self._atr: pd.Series           = atr
+        self._close: pd.Series         = close
 
         # ── Long-term trend SMA for directional bias ───────────────────────
         self._trend_sma: Optional[pd.Series] = None
         if cfg.trend_sma_window is not None:
             ts = close.rolling(window=cfg.trend_sma_window, min_periods=cfg.trend_sma_window).mean()
-            self._trend_sma = ts.shift(1)
+            self._trend_sma = ts
             print(f"[SMA] TrendBias SMA enabled (window={cfg.trend_sma_window}) — LONG above, SHORT below")
 
         # ── Optional advanced filters ──────────────────────────────────────
@@ -159,12 +165,25 @@ class SmaCrossoverStrategy(BaseStrategy):
             self._trend_min_tstat = cfg.trend_min_tstat
             print(f"[SMA] TrendFilter enabled (window={cfg.trend_window}, min_tstat={cfg.trend_min_tstat})")
 
+        self._hl_filter: Optional[HalfLifeFilter] = None
+        if cfg.use_hl_filter:
+            self._hl_filter = HalfLifeFilter(
+                series=close,
+                window=cfg.hl_window,
+                max_half_life=cfg.hl_baseline, # Doesn't matter for entry block here, just configures max internally
+                lambda_min=getattr(engine.settings, "hl_lambda_min", 1e-4),
+                max_cap=getattr(engine.settings, "hl_max_cap", 500.0),
+            )
+            print(f"[SMA] HalfLife Time-Stop enabled (window={cfg.hl_window})")
+
         # ── Position tracking ──────────────────────────────────────────────
         self._invested: bool = False
         self._position_side: Optional[str] = None
         self._entry_price: float = 0.0
         self._sl_price: float = 0.0
         self._tp_price: float = 0.0
+        self._bars_held: int = 0
+        self._entry_hl: float = 0.0
 
         valid = self._crossover.notna().sum()
         n_crosses = int((self._crossover != 0).sum())
@@ -186,12 +205,12 @@ class SmaCrossoverStrategy(BaseStrategy):
         return {
             "sma_fast_window":      (5,   50,   5),
             "sma_slow_window":      (20, 200,  10),
-            #"sma_atr_sl_mult":      (1.0, 3.0, 0.5),
-            #"sma_atr_tp_mult":      (1.5, 6.0, 0.5),
-            #"sma_vol_min_pct":      (0.10, 0.60, 0.05),
-            #"sma_vol_max_pct":      (0.60, 1.00, 0.05),
-            #"sma_trend_min_tstat":  (0.5,  3.0, 0.25),
-            #"sma_trend_sma_window": (200, 3000, 100),
+            "sma_atr_sl_mult":      (1.0, 3.0, 0.5),
+            "sma_atr_tp_mult":      (1.5, 6.0, 0.5),
+            "sma_vol_min_pct":      (0.10, 0.60, 0.05),
+            "sma_vol_max_pct":      (0.60, 1.00, 0.05),
+            "sma_trend_min_tstat":  (0.5,  3.0, 0.25),
+            "sma_trend_sma_window": (200, 3000, 100),
         }
 
     # ── Event hook ─────────────────────────────────────────────────────────────
@@ -217,8 +236,19 @@ class SmaCrossoverStrategy(BaseStrategy):
 
         orders: List[Order] = []
 
-        # ── In position: check SL / TP / reversal exits ────────────────────
+        # ── In position: check SL / TP / reversal / time exits ─────────────────
         if self._invested:
+            self._bars_held += 1
+            
+            # Time stop based on Half-Life
+            if self._bars_held > (self._entry_hl * self.config.hl_max_holding_mult):
+                orders.append(
+                    self.market_order("SELL" if self._position_side == "LONG" else "BUY", 
+                                      self.settings.fixed_qty, reason="TIME_STOP")
+                )
+                self._reset_state()
+                return orders
+                
             if self._position_side == "LONG":
                 hit_sl      = close <= self._sl_price
                 hit_tp      = close >= self._tp_price
@@ -250,6 +280,8 @@ class SmaCrossoverStrategy(BaseStrategy):
                 self._entry_price = close
                 self._sl_price = close - atr_val * self.config.atr_sl_mult
                 self._tp_price = close + atr_val * self.config.atr_tp_mult
+                self._bars_held = 0
+                self._entry_hl = self._hl_filter.get(timestamp, self.config.hl_baseline) if self._hl_filter else self.config.hl_baseline
                 orders.append(self.market_order("BUY", self.settings.fixed_qty, reason="SIGNAL"))
 
             elif crossover == -1.0:  # Fast just crossed below slow
@@ -258,6 +290,8 @@ class SmaCrossoverStrategy(BaseStrategy):
                 self._entry_price = close
                 self._sl_price = close + atr_val * self.config.atr_sl_mult
                 self._tp_price = close - atr_val * self.config.atr_tp_mult
+                self._bars_held = 0
+                self._entry_hl = self._hl_filter.get(timestamp, self.config.hl_baseline) if self._hl_filter else self.config.hl_baseline
                 orders.append(self.market_order("SELL", self.settings.fixed_qty, reason="SIGNAL"))
 
         return orders
@@ -312,3 +346,5 @@ class SmaCrossoverStrategy(BaseStrategy):
         self._entry_price = 0.0
         self._sl_price = 0.0
         self._tp_price = 0.0
+        self._bars_held = 0
+        self._entry_hl = 0.0

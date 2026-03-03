@@ -258,7 +258,7 @@ class WalkForwardOptimizer:
             return WFVReport(symbol, strategy_class.__name__, 0, [])
 
         print(
-            f"[WFV] Data range: {data.index[0].date()} → {data.index[-1].date()} "
+            f"[WFV] Data range: {data.index[0].date()} -> {data.index[-1].date()} "
             f"| {len(data):,} bars"
         )
 
@@ -294,8 +294,8 @@ class WalkForwardOptimizer:
 
             print(
                 f"\n  Fold {i + 1}/{len(folds)}: "
-                f"IS {train_start.date()} → {train_end.date()} | "
-                f"OOS {test_start.date()} → {test_end.date()}"
+                f"IS {train_start.date()} -> {train_end.date()} | "
+                f"OOS {test_start.date()} -> {test_end.date()}"
             )
 
             # 1. Optimize (IS) — dataset injected
@@ -340,7 +340,7 @@ class WalkForwardOptimizer:
             )
 
             print(
-                f"  Fold {i + 1}: IS {opt_result['best_score']:.2f} → "
+                f"  Fold {i + 1}: IS {opt_result['best_score']:.2f} -> "
                 f"OOS {eval_result['score']:.2f} "
                 f"({fold_end_time - fold_start_time:.1f}s)"
             )
@@ -384,7 +384,7 @@ class WalkForwardOptimizer:
             f"  Median OOS:     {report.median_oos_score:.4f} (Composite Score)"
         )
         print(
-            f"  Perf Decay:     {report.median_degradation:+.1%} (IS → OOS)"
+            f"  Perf Decay:     {report.median_degradation:+.1%} (IS -> OOS)"
         )
         print(
             f"  Skeptic Confidence (DSR): {report.avg_dsr:.0%} "

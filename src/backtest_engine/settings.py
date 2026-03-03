@@ -34,7 +34,7 @@ class BacktestSettings(BaseSettings):
     results_dir: Path = Field(default=Path("results"), description="Output directory for reports")
 
     # ── Primary instrument ─────────────────────────────────────────────────────
-    default_symbol: str = "YM"
+    default_symbol: str = "NQ"
 
     # ── Bar settings ───────────────────────────────────────────────────────────
     low_interval: str = "30m"      # Base resolution used for data loading
@@ -49,14 +49,20 @@ class BacktestSettings(BaseSettings):
     fixed_qty: int = 1                # Default number of contracts per signal
 
     # ── Trading hours (exchange time, HH:MM strings) ───────────────────────────
-    trade_start_time: str = "06:00"
-    trade_end_time: str = "15:00"
-    eod_close_time: Optional[str] = "15:30"  # Force-close time; None = disabled
+    use_trading_hours: bool = True               # Toggle to enable/disable trading session limits
+    trade_start_time: Optional[str] = "06:00"    # E.g. "06:00", None = disabled if use_trading_hours is False
+    trade_end_time: Optional[str] = "15:00"      # E.g. "15:00", None = disabled if use_trading_hours is False
+    eod_close_time: Optional[str] = "15:30"      # Force-close time; None = disabled
 
     # ── Risk limits (kill switches) ────────────────────────────────────────────
     max_daily_loss: Optional[float] = None      # Halt today if daily loss exceeds value
     max_drawdown_pct: Optional[float] = None    # Permanent halt at this drawdown %
     max_account_floor: Optional[float] = None   # Permanent halt below this equity level
+
+    # ── Statistical Filters / Numerical Protections ────────────────────────────
+    # Remark: Setting any of these to None will disable the corresponding numerical protection.
+    hl_lambda_min: Optional[float] = 1e-4       # Minimum mean-reverting speed (slope) to consider the series stationary
+    hl_max_cap: Optional[float] = 500.0         # Hard cap limit for calculated Half-Life (preventing explosion to infinity)
 
     # ── Instrument specifications ──────────────────────────────────────────────
     instrument_specs: dict = Field(
