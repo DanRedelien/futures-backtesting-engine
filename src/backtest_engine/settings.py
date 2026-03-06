@@ -34,7 +34,7 @@ class BacktestSettings(BaseSettings):
     results_dir: Path = Field(default=Path("results"), description="Output directory for reports")
 
     # ── Primary instrument ─────────────────────────────────────────────────────
-    default_symbol: str = "NQ"
+    default_symbol: str = "ES"
 
     # ── Bar settings ───────────────────────────────────────────────────────────
     low_interval: str = "30m"      # Base resolution used for data loading
@@ -42,7 +42,7 @@ class BacktestSettings(BaseSettings):
     bar_size: float = 0.0         # Threshold for volume / range bar types
 
     # ── Portfolio & execution ──────────────────────────────────────────────────
-    initial_capital: float = 100_000.0
+    initial_capital: float = 1_000_000.0
     risk_free_rate: float = 0.02
     commission_rate: float = 2.5      # Per contract, in dollars
     max_slippage_ticks: int = 1       # Random slippage: uniform in [0, max]

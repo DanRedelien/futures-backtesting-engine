@@ -88,13 +88,13 @@ class ZScoreReversalConfig:
 
     """
     # ── Signal generation ──────────────────────────────────────────────────────
-    zscore_window: int = 50
-    zscore_entry_lvl: float = 1.5
+    zscore_window: int = 115
+    zscore_entry_lvl: float = 1.475
 
     # ── Risk management ────────────────────────────────────────────────────────
     atr_window: int = 14
-    atr_sl_mult: float = 2.0
-    atr_tp_mult: float = 5.0
+    atr_sl_mult: float = 1.625
+    atr_tp_mult: float = 3.375
 
     # ── Direction ──────────────────────────────────────────────────────────────
     trade_direction: str = "both"
@@ -104,7 +104,7 @@ class ZScoreReversalConfig:
     vol_regime_window: int = 50
     vol_history_window: int = 500
     vol_min_pct: float = 0.15
-    vol_max_pct: float = 0.85
+    vol_max_pct: float = 0.825
 
     # ── Half-Life filter ───────────────────────────────────────────────────────
     use_hl_filter: bool = True

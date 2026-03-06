@@ -174,7 +174,7 @@ class MeanReversionStrategy(BaseStrategy):
             "mr_rsi_window":      (8, 24, 2),
             "mr_rsi_oversold":    (18.0, 35.0, 1.0),
             "mr_rsi_overbought":  (65.0, 82.0, 1.0),
-            "mr_atr_sl_mult":     (0.8, 2.5, 0.2),
+            "mr_atr_sl_mult":     (0.8, 2.6, 0.2),
             "mr_trend_max_tstat": (1.5, 3.0, 0.25),
             "mr_vol_max_pct":     (0.75, 0.95, 0.05),
         }

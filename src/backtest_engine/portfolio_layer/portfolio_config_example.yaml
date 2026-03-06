@@ -1,0 +1,60 @@
+# Portfolio Backtest Configuration
+#
+# Run with:
+#   python run.py --portfolio-backtest --portfolio-config src/backtest_engine/portfolio_layer/portfolio_config_example.yaml
+#
+# No-lookahead guarantee:
+#   Signal generated at close[t] -> order queued -> fills at open[t+1].
+#
+# Rebalance note:
+#   rebalance_frequency controls when the Allocator snapshots equity for sizing.
+#   Strategy signals still evaluate every bar (intraday).
+#
+# Sizing methodology:
+#   Vol-targeting: each slot receives (equity * weight) dollars, then scaled so
+#   annualised portfolio vol matches target_portfolio_vol.
+#   Size in contracts = round(slot_equity * vol_scalar / (price * tick_size))
+#   where tick_size is the dollar value per minimum price move (from settings.py
+#   instrument_specs).  This mirrors prop-desk futures sizing (risk per tick, not
+#   full notional).  Result is capped at max_contracts_per_slot per (slot, symbol).
+#
+# Shared settings (commission_rate, max_slippage_ticks, kill-switch thresholds,
+# eod_close_time, trading hours) live in settings.py — no duplication here.
+
+portfolio:
+  rebalance_frequency: daily          # intrabar | daily | weekly
+  benchmark_symbol: ES                # Buy-and-hold benchmark shown in dashboard (null to disable)
+
+  # ── Vol-targeting ─────────────────────────────────────────────────────────
+  target_portfolio_vol: 0.10          # Annualised portfolio vol target (10 %)
+  vol_lookback_bars: 20               # Rolling window (bars) for realised vol estimate
+  max_contracts_per_slot: 3           # Hard cap on contracts per (slot, symbol)
+
+strategies:
+  - strategy: stat_level
+    symbols:
+      - YM
+    weight: 0.25
+    timeframe: 30m
+    params: {}
+
+  - strategy: stat_level
+    symbols:
+      - NQ
+    weight: 0.25
+    timeframe: 30m
+    params: {}
+
+  - strategy: SmaCrossoverStrategy
+    symbols:
+      - ES
+    weight: 0.25
+    timeframe: 30m
+    params: {}
+
+  - strategy: zscore
+    symbols:
+      - ES
+    weight: 0.25
+    timeframe: 30m
+    params: {}

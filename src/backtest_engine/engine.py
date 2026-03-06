@@ -18,9 +18,8 @@ import pandas as pd
 import numpy as np
 
 from .execution import ExecutionHandler, Fill, Order, Trade
-from .analytics import PerformanceMetrics
+from .analytics import PerformanceMetrics, save_backtest_results
 from .settings import BacktestSettings, get_settings
-from .visualizer import Visualizer
 from src.data.data_lake import DataLake
 from src.data.bar_builder import BarBuilder
 
@@ -138,7 +137,6 @@ class BacktestEngine:
         self.settings = settings or get_settings()
         self.execution = ExecutionHandler(self.settings)
         self.analytics = PerformanceMetrics(self.settings.risk_free_rate)
-        self.visualizer = Visualizer()
         self.data_lake = DataLake()
 
         self.start_date = start_date
@@ -417,9 +415,17 @@ class BacktestEngine:
 
     def show_results(self) -> None:
         """
-        Computes performance metrics and renders the dashboard.
+        Computes performance metrics, prints the report, and saves results to disk.
 
-        Benchmark: Buy-and-hold of the primary symbol (self.data close prices).
+        Methodology:
+            Follows the standard quant workflow:
+            1. Calculate metrics from portfolio history.
+            2. Print the full report to the terminal (unchanged from prior behaviour).
+            3. Persist history, trades, benchmark, report text, and metrics JSON
+               to results/ via the exporter so the Streamlit dashboard can load
+               them independently without re-running the engine.
+
+        Benchmark: buy-and-hold of the primary symbol (close price series).
         """
         history = self.portfolio.get_history_df()
         if history.empty:
@@ -428,7 +434,16 @@ class BacktestEngine:
 
         trades = self.execution.trades
         metrics = self.analytics.calculate_metrics(history, trades)
-        self.analytics.print_full_report(metrics, trades)
+
+        # Build the report string once — used for both terminal and dashboard
+        report_str = self.analytics.get_full_report_str(metrics, trades)
+        print(report_str)
 
         benchmark = self.data["close"] if not self.data.empty else None
-        self.visualizer.plot_dashboard(history, trades, benchmark=benchmark)
+        save_backtest_results(
+            history=history,
+            trades=trades,
+            report_str=report_str,
+            metrics=metrics,
+            benchmark=benchmark,
+        )
