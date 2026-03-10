@@ -121,7 +121,7 @@ class IctOrderBlockConfig:
     vol_regime_window: int = 50
     vol_history_window: int = 500
     vol_min_pct: float = 0.20
-    vol_max_pct: float = 0.87
+    vol_max_pct: float = 0.80
 
 
 # Small container for a pending order block
@@ -253,8 +253,6 @@ class IctOrderBlockStrategy(BaseStrategy):
             "ict_ob_max_age_bars":     (10, 60, 5),
             "ict_atr_tp_mult":         (2.0, 5.0, 0.25),
             "ict_sl_offset_ticks":     (0, 3, 1),
-            "ict_vol_min_pct":         (0.10, 0.35, 0.05),
-            "ict_vol_max_pct":         (0.75, 0.95, 0.05),
         }
 
     # ── Main event hook ────────────────────────────────────────────────────────

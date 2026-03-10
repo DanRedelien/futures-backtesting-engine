@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.graph_objects as go
+from src.backtest_engine.settings import BacktestSettings
 from typing import Optional
 
 from src.backtest_engine.analytics.dashboard.core.styles import PALETTE
@@ -271,12 +272,22 @@ def build_vol_regime_chart(trades: pd.DataFrame) -> go.Figure:
     if df.empty:
         return _empty_fig("No Volatility Data")
 
-    # Use quantiles to bucket regimes
+    # Use fixed percentile bins matching the strategy's filtering logic
+    # Try to read dynamic thresholds from data, fallback to global settings
+    _settings = BacktestSettings()
+    v_min = trades["vol_min_pct"].iloc[0] if "vol_min_pct" in trades.columns and not pd.isna(trades["vol_min_pct"].iloc[0]) else _settings.vol_min_pct_default
+    v_max = trades["vol_max_pct"].iloc[0] if "vol_max_pct" in trades.columns and not pd.isna(trades["vol_max_pct"].iloc[0]) else _settings.vol_max_pct_default
+
     try:
-        df['vol_bucket'] = pd.qcut(df['entry_volatility'], q=3, labels=['Low', 'Medium', 'High'])
-    except ValueError:
-        # Fallback if quantiles are not unique
-        return _empty_fig("Insufficient Vol Variance")
+        df['vol_bucket'] = pd.cut(
+            df['entry_volatility'], 
+            bins=[0.0, v_min, v_max, 1.0], 
+            labels=['Compression', 'Normal', 'Panic'],
+            include_lowest=True
+        )
+    except Exception:
+        # Fallback if bins are problematic
+        return _empty_fig("Invalid Volatility Distribution")
 
     grouped = df.groupby("vol_bucket", observed=False).agg(
         avg_pnl=("pnl", "mean"),

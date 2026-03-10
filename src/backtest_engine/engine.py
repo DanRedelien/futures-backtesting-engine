@@ -363,4 +363,5 @@ class BacktestEngine:
             benchmark=benchmark,
             data_map=dmap,
             settings=self.settings,
+            strategy=self.strategy,
         )

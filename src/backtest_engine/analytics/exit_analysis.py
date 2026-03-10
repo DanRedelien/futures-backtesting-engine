@@ -15,6 +15,10 @@ import pandas as pd
 def enrich_trades_with_exit_analytics(
     trades_df: pd.DataFrame, 
     data_map: Dict[Any, pd.DataFrame],
+    regime_window: Optional[int] = None,
+    history_window: Optional[int] = None,
+    vol_min_pct: Optional[float] = None,
+    vol_max_pct: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Enriches a trades DataFrame with exit analytics:
@@ -40,10 +44,15 @@ def enrich_trades_with_exit_analytics(
 
     try:
         from src.backtest_engine.settings import BacktestSettings
-
         settings = BacktestSettings()
     except Exception:
         settings = None
+    
+    # Resolve parameters from settings if not passed explicitly
+    _rw = regime_window if regime_window is not None else (settings.vol_regime_window_default if settings else 50)
+    _hw = history_window if history_window is not None else (settings.vol_history_window_default if settings else 500)
+    _min_p = vol_min_pct if vol_min_pct is not None else (settings.vol_min_pct_default if settings else 0.20)
+    _max_p = vol_max_pct if vol_max_pct is not None else (settings.vol_max_pct_default if settings else 0.80)
     
     # Pre-allocate columns with proper dtypes
     df["holding_time"] = pd.Series(dtype='timedelta64[ns]')
@@ -54,6 +63,8 @@ def enrich_trades_with_exit_analytics(
     for h in horizons:
         df[f"pnl_decay_{h}m"] = np.nan
     df["entry_volatility"] = np.nan
+    df["vol_min_pct"] = _min_p
+    df["vol_max_pct"] = _max_p
 
     # Group by symbol to pre-calculate volatility and handle lookups efficiently
     for (slot_id, symbol), group in df.groupby(["slot_id", "symbol"], dropna=False):
@@ -69,11 +80,12 @@ def enrich_trades_with_exit_analytics(
         if not df_sym.index.is_monotonic_increasing:
             df_sym = df_sym.sort_index()
 
-        # Pre-calculate rolling volatility (14-period C2C)
-        # We handle this once per symbol/dataframe
+        # Pre-calculate rolling volatility (matching VolatilityRegimeFilter logic)
+        # 1. Price Standard Deviation (Window=_rw)
+        # 2. Percentile Rank (Window=_hw)
         try:
-            rets = df_sym["close"].pct_change()
-            rolling_vol = rets.rolling(window=14).std()
+            rolling_std = df_sym["close"].rolling(window=_rw, min_periods=_rw // 2).std()
+            rolling_vol = rolling_std.rolling(window=_hw, min_periods=_hw // 2).rank(pct=True)
         except Exception:
             rolling_vol = pd.Series(np.nan, index=df_sym.index)
 
@@ -122,9 +134,11 @@ def enrich_trades_with_exit_analytics(
             # Entry Volatility (Calculated from pre-cached rolling_vol)
             try:
                 # searchsorted with side='right' and minus 1 mimics method='pad'
-                pos = np.searchsorted(idx_array, entry, side='right') - 1
+                target_dt = np.datetime64(entry)
+                pos = np.searchsorted(idx_array, target_dt, side='right') - 1
                 if pos >= 0:
-                    df.at[idx, "entry_volatility"] = float(rolling_vol.iloc[pos])
+                    val = rolling_vol.iloc[pos]
+                    df.at[idx, "entry_volatility"] = float(val)
             except Exception:
                 pass
 

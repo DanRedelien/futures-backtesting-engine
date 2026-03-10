@@ -59,8 +59,8 @@ class MeanReversionConfig:
     use_vol_filter: bool = True    # Only trade during "normal" volatility
     vol_regime_window: int = 50    # Short-term window to measure current vol
     vol_history_window: int = 500  # Historical window to compare against
-    vol_min_pct: float = 0.30      # Minimum activity allowed (no dead markets)
-    vol_max_pct: float = 0.90      # Maximum activity allowed (no crazy fast markets)
+    vol_min_pct: float = 0.20      # Minimum activity allowed (no dead markets)
+    vol_max_pct: float = 0.80      # Maximum activity allowed (no crazy fast markets)
 
     use_trend_filter: bool = True  # Block trading if the market is trending
     trend_window: int = 100        # Window to look for trends
@@ -176,7 +176,6 @@ class MeanReversionStrategy(BaseStrategy):
             "mr_rsi_overbought":  (65.0, 82.0, 1.0),
             "mr_atr_sl_mult":     (0.8, 2.6, 0.2),
             "mr_trend_max_tstat": (1.5, 3.0, 0.25),
-            "mr_vol_max_pct":     (0.75, 0.95, 0.05),
         }
 
     # ── Event hook ─────────────────────────────────────────────────────────────

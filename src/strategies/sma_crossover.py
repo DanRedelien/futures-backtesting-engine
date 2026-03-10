@@ -61,8 +61,8 @@ class SmaCrossoverConfig:
     use_vol_filter: bool = True    # Only trade during "normal" volatility
     vol_regime_window: int = 50    # Short-term window to measure current vol
     vol_history_window: int = 500  # Historical window to compare against
-    vol_min_pct: float = 0.30      # Minimum activity allowed (no dead markets)
-    vol_max_pct: float = 0.95      # Maximum activity allowed (no panic/crash markets)
+    vol_min_pct: float = 0.20      # Minimum activity allowed (no dead markets)
+    vol_max_pct: float = 0.80      # Maximum activity allowed (no panic/crash markets)
 
     use_trend_filter: bool = True  # Only enter when trend is statistically confirmed
     trend_window: int = 100        # Window to measure trend strength

@@ -103,8 +103,8 @@ class ZScoreReversalConfig:
     use_vol_filter: bool = True
     vol_regime_window: int = 50
     vol_history_window: int = 500
-    vol_min_pct: float = 0.15
-    vol_max_pct: float = 0.825
+    vol_min_pct: float = 0.20
+    vol_max_pct: float = 0.80
 
     # ── Half-Life filter ───────────────────────────────────────────────────────
     use_hl_filter: bool = True
@@ -219,7 +219,6 @@ class ZScoreReversalStrategy(BaseStrategy):
             "zscore_atr_sl_mult":      (1.0, 3.0, 0.25),
             "zscore_atr_tp_mult":      (1.5, 4.5, 0.25),
             "zscore_hl_baseline":      (3.0, 12.0, 1.0),
-            "zscore_vol_max_pct":      (0.75, 0.95, 0.05),
         }
 
     # ── Main event hook ────────────────────────────────────────────────────────

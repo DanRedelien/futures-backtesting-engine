@@ -39,6 +39,7 @@ def save_backtest_results(
     benchmark: Optional[pd.Series] = None,
     data_map: Optional[Dict[str, pd.DataFrame]] = None,
     settings: Optional[BacktestSettings] = None,
+    strategy: Optional[Any] = None,
 ) -> Path:
     """
     Saves all backtest artifacts to the configured results directory.
@@ -64,6 +65,17 @@ def save_backtest_results(
     
     _settings = settings or BacktestSettings()
     results_dir: Path = _settings.get_results_path()
+
+    # Extract dynamic vol regimes if strategy is available
+    vol_params = {}
+    if strategy and hasattr(strategy, "config"):
+        cfg = strategy.config
+        vol_params = {
+            "regime_window": getattr(cfg, "vol_regime_window", _settings.vol_regime_window_default),
+            "history_window": getattr(cfg, "vol_history_window", _settings.vol_history_window_default),
+            "vol_min_pct": getattr(cfg, "vol_min_pct", _settings.vol_min_pct_default),
+            "vol_max_pct": getattr(cfg, "vol_max_pct", _settings.vol_max_pct_default),
+        }
 
     # Equity curve
     if not history.empty:
@@ -92,7 +104,11 @@ def save_backtest_results(
         
         trades_df = pd.DataFrame(rows)
         if not trades_df.empty and data_map:
-            trades_df = enrich_trades_with_exit_analytics(trades_df, data_map)
+            trades_df = enrich_trades_with_exit_analytics(
+                trades_df, 
+                data_map, 
+                **vol_params
+            )
             
         trades_df.to_parquet(results_dir / "trades.parquet", index=False)
 
@@ -111,6 +127,11 @@ def save_backtest_results(
     (results_dir / "metrics.json").write_text(
         json.dumps(json_metrics, indent=2), encoding="utf-8"
     )
+
+    # Save vol_params to manifest for dashboard context
+    manifest_extras = {
+        "vol_regime_config": vol_params
+    }
 
     # Run type marker for the dashboard
     base_results_dir = _settings.base_dir / _settings.results_dir

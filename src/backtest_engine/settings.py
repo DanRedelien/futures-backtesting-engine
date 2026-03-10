@@ -64,7 +64,12 @@ class BacktestSettings(BaseSettings):
     # Remark: Setting any of these to None will disable the corresponding numerical protection.
     hl_lambda_min: Optional[float] = 1e-4       # Minimum mean-reverting speed (slope) to consider the series stationary
     hl_max_cap: Optional[float] = 500.0         # Hard cap limit for calculated Half-Life (preventing explosion to infinity)
-
+    
+    # ── Volatility Regime Analytics Defaults ──────────────────────────────────
+    vol_regime_window_default: int = 50         # Short-term window for rolling price std calculation
+    vol_history_window_default: int = 500       # Historical window for percentile ranking of volatility
+    vol_min_pct_default: float = 0.20           # Lower percentile bound: below this is 'Compression'
+    vol_max_pct_default: float = 0.80           # Upper percentile bound: above this is 'Panic'
 
     # ── IB Fetcher ─────────────────────────────────────────────────────────────
     ib_host: str = "127.0.0.1"
