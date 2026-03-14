@@ -31,6 +31,11 @@ from .summaries import (
     compute_per_strategy_summary,
     compute_exit_summary,
 )
+from .strategy_stats import (
+    TERMINAL_STRATEGY_STATS_COLUMNS,
+    compute_strategy_stats,
+    compute_strategy_stats_map,
+)
 
 __all__ = [
     'build_bar_pnl_matrix',
@@ -52,4 +57,7 @@ __all__ = [
     'compute_strategy_decomp',
     'compute_per_strategy_summary',
     'compute_exit_summary',
+    'TERMINAL_STRATEGY_STATS_COLUMNS',
+    'compute_strategy_stats',
+    'compute_strategy_stats_map',
 ]

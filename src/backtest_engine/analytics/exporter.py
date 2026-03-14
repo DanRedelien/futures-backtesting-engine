@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from src.backtest_engine.analytics.artifact_contract import build_artifact_identity
 from src.backtest_engine.settings import BacktestSettings
 from src.backtest_engine.serialization import dumps_json
 
@@ -147,16 +148,23 @@ def save_backtest_results(
 
     manifest = {
         "run_type": "single",
-        "schema_version": "1.0",
         "generated_at": datetime.now(timezone.utc),
         "artifacts": saved_artifacts,
         "strategy_class": strategy.__class__.__name__ if strategy is not None else None,
         "vol_regime_config": vol_params,
+        "run_seed": _settings.random_seed,
         "settings_context": {
             "default_symbol": _settings.default_symbol,
             "results_dir": results_dir,
         },
     }
+    manifest.update(
+        build_artifact_identity(
+            run_type="single",
+            artifact_path=results_dir,
+            project_root=_settings.base_dir,
+        )
+    )
     (results_dir / "manifest.json").write_text(
         dumps_json(manifest), encoding="utf-8"
     )

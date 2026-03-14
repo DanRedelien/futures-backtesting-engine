@@ -18,16 +18,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-
-def get_results_dir() -> Path:
-    """
-    Resolves the results/ directory relative to the project root.
-
-    Returns:
-        Absolute path to results/.
-    """
-    # core/components.py → core/ → dashboard/ → analytics/ → backtest_engine/ → src/ → project root
-    return Path(__file__).parent.parent.parent.parent.parent.parent / "results"
+from src.backtest_engine.analytics.dashboard.core.paths import get_results_dir
 
 
 def load_parquet(filename: str) -> Optional[pd.DataFrame]:

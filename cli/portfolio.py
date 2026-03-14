@@ -9,15 +9,45 @@ This module is called exclusively by run.py --portfolio-backtest.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+_DATA_VERSION_DIGEST_LENGTH = 16
+
+
+def _compute_data_version(
+    data_lake: "DataLake",
+    requirements: List[Tuple[str, str]],
+) -> str:
+    """
+    Builds a lightweight cache fingerprint for rerun compatibility metadata.
+
+    Methodology:
+        This uses a pragmatic provenance marker that changes when any
+        required cached input file changes. Using ordered cache file mtimes is
+        sufficient for the rerun guard without broadening the current scope.
+
+    Args:
+        data_lake: Cache resolver used for required market data inputs.
+        requirements: Required `(symbol, timeframe)` pairs for the run.
+
+    Returns:
+        Short SHA-256 digest representing the current cache state.
+    """
+    digest = hashlib.sha256()
+    for symbol, timeframe in sorted(requirements):
+        cache_file = data_lake._get_cache_file(symbol, timeframe)
+        if cache_file.exists():
+            digest.update(f"{symbol}:{timeframe}:{cache_file.stat().st_mtime_ns}".encode("utf-8"))
+    return digest.hexdigest()[:_DATA_VERSION_DIGEST_LENGTH]
+
+
 def run(
     config_path: str,
-    launch_dashboard: bool = False,
     results_subdir: Optional[str] = None,
     scenario_id: Optional[str] = None,
     baseline_run_id: Optional[str] = None,
@@ -36,7 +66,6 @@ def run(
 
     Args:
         config_path: Path to the YAML config file (absolute or project-relative).
-        launch_dashboard: If True, launch Streamlit after the backtest.
         results_subdir: Optional project-relative or absolute artifact directory.
         scenario_id: Optional scenario identifier for manifest metadata.
         baseline_run_id: Optional baseline reference for scenario manifests.
@@ -44,8 +73,6 @@ def run(
         scenario_params_json: Optional JSON payload describing rerun parameters.
     """
     import yaml
-    import subprocess
-
     from src.backtest_engine.portfolio_layer.engine import PortfolioBacktestEngine
     from src.backtest_engine.portfolio_layer.domain.contracts import (
         PortfolioConfig, StrategySlot,
@@ -115,8 +142,7 @@ def run(
         print(f"[Data] Example: python run.py --download {symbols_str}")
         sys.exit(1)
 
-    from src.backtest_engine.settings import BacktestSettings
-    settings = BacktestSettings()
+    data_version = _compute_data_version(data_lake=data_lake, requirements=requirements)
     engine = PortfolioBacktestEngine(config, settings=settings)
     engine.run()
 
@@ -135,9 +161,13 @@ def run(
         if not output_dir.is_absolute():
             output_dir = project_root / output_dir
 
+    config_hash = hashlib.sha256(cfg_path.read_bytes()).hexdigest()
     manifest_metadata: Dict[str, Any] = {
         "run_kind": "scenario" if scenario_id else "baseline",
         "source_config_path": str(cfg_path.resolve()),
+        "config_hash": config_hash,
+        "run_seed": settings.random_seed,
+        "data_version": data_version,
     }
     if scenario_id:
         manifest_metadata["scenario_id"] = scenario_id
@@ -148,7 +178,7 @@ def run(
     if scenario_params is not None:
         manifest_metadata["scenario_params"] = scenario_params
 
-    # Load benchmark price series for reporting/dashboard
+    # Load benchmark price series for reporting and analytics views.
     benchmark_data = None
     if config.benchmark_symbol:
         from src.data.data_lake import DataLake
@@ -165,15 +195,3 @@ def run(
         output_dir=output_dir,
         manifest_metadata=manifest_metadata,
     )
-
-    if launch_dashboard:
-        dashboard_path = (
-            project_root
-            / "src" / "backtest_engine" / "analytics" / "dashboard" / "app.py"
-        )
-        print("\n[Dashboard] Launching Streamlit dashboard...")
-        subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(dashboard_path)],
-            cwd=str(project_root),
-            check=False,
-        )

@@ -13,3 +13,8 @@ plotly>=5.18.0
 pyarrow>=14.0.0
 PyYAML>=6.0.0
 ib_insync>=0.9.80
+fastapi
+jinja2
+redis
+rq
+uvicorn

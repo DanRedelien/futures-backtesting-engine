@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if error_title %}
+<main class="terminal-error-shell">
+    <section class="terminal-error-card">
+        <div class="terminal-kicker">Quant Terminal</div>
+        <h1>{{ error_title }}</h1>
+        <p>{{ error_message }}</p>
+    </section>
+</main>
+{% else %}
+<main class="terminal-shell">
+    <aside class="terminal-sidebar">
+        <div class="terminal-sidebar__section">
+            {# Bump the visible terminal version for significant UI updates: 3.0 -> 3.1 -> 3.2. #}
+            <div class="terminal-kicker">Version 3.0</div>
+            <h1>Quant Terminal</h1>
+            <div class="terminal-sidebar__meta">
+                <div><span>Mode</span><strong>{{ shell.mode_label }}</strong></div>
+                <div><span>Artifact</span><strong>{{ shell.artifact_id }}</strong></div>
+                <div><span>Schema</span><strong>{{ shell.schema_version }}</strong></div>
+                <div><span>Engine</span><strong>{{ shell.engine_version }}</strong></div>
+            </div>
+        </div>
+
+        <form id="dashboard-filters" class="terminal-sidebar__section">
+            <input type="hidden" name="tab" id="dashboard-tab-input" value="{{ shell.default_tab }}">
+            <input type="hidden" name="selected_job_id" id="selected-job-id-input" value="">
+            <label class="terminal-field">
+                <span>Risk Scope</span>
+                <select name="risk_scope">
+                    {% for option in shell.risk_scope_options %}
+                    <option value="{{ option.value }}" {% if option.value == shell.default_risk_scope %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="terminal-field">
+                <span>Exit Detail</span>
+                <select name="exit_strategy">
+                    {% for option in shell.exit_strategy_options %}
+                    <option value="{{ option.value }}" {% if option.value == shell.default_exit_strategy %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="terminal-field">
+                <span>Correlation Horizon</span>
+                <select name="correlation_horizon">
+                    {% for horizon in ["1d", "1w", "1m"] %}
+                    <option value="{{ horizon }}" {% if horizon == shell.default_correlation_horizon %}selected{% endif %}>{{ horizon|upper }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <div class="terminal-field-group">
+                <label class="terminal-field">
+                    <span>Volatility x</span>
+                    <input
+                        type="number"
+                        name="stress_volatility"
+                        min="{{ shell.stress_bounds.min }}"
+                        max="{{ shell.stress_bounds.max }}"
+                        step="{{ shell.stress_bounds.step }}"
+                        value="{{ shell.stress_defaults.volatility }}"
+                    >
+                </label>
+                <label class="terminal-field">
+                    <span>Slippage x</span>
+                    <input
+                        type="number"
+                        name="stress_slippage"
+                        min="{{ shell.stress_bounds.min }}"
+                        max="{{ shell.stress_bounds.max }}"
+                        step="{{ shell.stress_bounds.step }}"
+                        value="{{ shell.stress_defaults.slippage }}"
+                    >
+                </label>
+                <label class="terminal-field">
+                    <span>Commission x</span>
+                    <input
+                        type="number"
+                        name="stress_commission"
+                        min="{{ shell.stress_bounds.min }}"
+                        max="{{ shell.stress_bounds.max }}"
+                        step="{{ shell.stress_bounds.step }}"
+                        value="{{ shell.stress_defaults.commission }}"
+                    >
+                </label>
+            </div>
+        </form>
+
+        <div class="terminal-sidebar__section">
+            <div class="terminal-sidebar__notice">{{ shell.scenario_notice }}</div>
+            <button class="terminal-button" type="button" data-tab-jump="operations">Open Operations</button>
+        </div>
+    </aside>
+
+    <div id="resize-sidebar" class="terminal-resize-handle terminal-resize-handle--col" aria-hidden="true"></div>
+
+    <section class="terminal-main">
+        <div
+            id="top-ribbon"
+            class="terminal-top-ribbon"
+            hx-get="/partials/top-ribbon"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+        ></div>
+
+        <div
+            id="main-stage"
+            class="terminal-main-stage"
+            hx-get="/partials/main-stage"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+        ></div>
+
+        <div id="resize-bottom" class="terminal-resize-handle terminal-resize-handle--row" aria-hidden="true"></div>
+
+        <section class="terminal-bottom">
+            <nav class="terminal-tabs">
+                {% for tab in shell.tabs %}
+                <button
+                    class="terminal-tab {% if tab.id == shell.default_tab %}is-active{% endif %}"
+                    type="button"
+                    data-tab="{{ tab.id }}"
+                >
+                    {{ tab.label }}
+                </button>
+                {% endfor %}
+            </nav>
+            <div
+                id="bottom-panel"
+                class="terminal-panel terminal-panel--scroll"
+                hx-get="/partials/bottom-panel"
+                hx-include="#dashboard-filters"
+                hx-trigger="load delay:120ms, change from:#dashboard-filters, dashboard-tab-change from:body"
+                hx-swap="innerHTML"
+            ></div>
+        </section>
+    </section>
+</main>
+{% endif %}
+{% endblock %}

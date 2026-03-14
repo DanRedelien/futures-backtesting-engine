@@ -1,0 +1,53 @@
+<section class="terminal-panel__stack">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Exit Analysis</h2>
+            <p>Summary table plus paginated trade detail-on-demand.</p>
+        </div>
+    </div>
+
+    <section class="terminal-chart-card">
+        <div class="terminal-chart-card__header">
+            <h3>Summary</h3>
+        </div>
+        {% set columns = summary_columns %}
+        {% set rows = summary_rows %}
+        {% include "components/table.html" with context %}
+    </section>
+
+    <section class="terminal-chart-card">
+        <div class="terminal-chart-card__header">
+            <h3>Trade Detail</h3>
+            <span>{{ exit_strategy }}</span>
+        </div>
+        {% set columns = detail_columns %}
+        {% set rows = detail_rows %}
+        {% include "components/table.html" with context %}
+
+        <div class="terminal-pagination">
+            <button
+                type="button"
+                class="terminal-button"
+                {% if not has_prev %}disabled{% endif %}
+                hx-get="/partials/bottom-panel?tab=exit-analysis&page={{ page - 1 }}"
+                hx-include="#dashboard-filters"
+                hx-target="#bottom-panel"
+                hx-swap="innerHTML"
+            >
+                Previous
+            </button>
+            <span>Page {{ page }} / {{ total_pages }}</span>
+            <button
+                type="button"
+                class="terminal-button"
+                {% if not has_next %}disabled{% endif %}
+                hx-get="/partials/bottom-panel?tab=exit-analysis&page={{ page + 1 }}"
+                hx-include="#dashboard-filters"
+                hx-target="#bottom-panel"
+                hx-swap="innerHTML"
+            >
+                Next
+            </button>
+        </div>
+    </section>
+</section>

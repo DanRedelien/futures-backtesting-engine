@@ -1,6 +1,19 @@
 """
 Entry point for the Backtesting Engine.
 
+TODO: create 4-step testing line, like:
+
+1. python run.py --download ES NQ YM RTY CL GC SI
+2. python run.py --backtest --strategy zscore (Create strategy and test in with Deep-Analysis)
+3. python run.py --ultra fast single strategys (create ultra fast and very simple strategy tester, 
+    he takes 10 selected strategys and runs them in single strategy mode, 
+    then builds matplot lib with them all(only graph) without saving .png, just open in window.
+    + 3 metrics, pnl%, Sharp ratio, MDD% per strategy, that all in one graph)
+    Like protoflio mode, but without deep-analysis.
+4. Optimizer (optimize best strategy)
+5. python run.py --portfolio-backtest (take best and create uncorrletaed pnl strategys.)
+
+
 Execution modes:
     1. Single-Asset Backtest      (--backtest)
     2. Walk-Forward Optimization  (--wfo)
@@ -38,25 +51,33 @@ import sys
 from pathlib import Path
 
 
-_DASHBOARD_PATH = (
-    Path(__file__).parent
-    / "src" / "backtest_engine" / "analytics" / "dashboard" / "app.py"
-)
 _PROJECT_ROOT = Path(__file__).parent
+_TERMINAL_DASHBOARD_APP = "src.backtest_engine.analytics.terminal_ui.app:app"
+_TERMINAL_DASHBOARD_HOST = "127.0.0.1"
+_TERMINAL_DASHBOARD_PORT = "8000"
 
 
 def _launch_dashboard() -> None:
     """
-    Launches Streamlit dashboard as a child process.
+    Launches the FastAPI terminal dashboard as a child process.
 
-    Runs in the foreground so the terminal shows Streamlit logs.
+    Runs in the foreground so the terminal shows ASGI logs.
     The backtest process has already finished writing artifacts before
     this call — no race condition.
     """
-    print("\n[Dashboard] Launching Streamlit dashboard...")
-    print(f"[Dashboard] URL: http://localhost:8501\n")
+    print("\n[Dashboard] Launching terminal dashboard...")
+    print(f"[Dashboard] URL: http://{_TERMINAL_DASHBOARD_HOST}:{_TERMINAL_DASHBOARD_PORT}\n")
     subprocess.run(
-        [sys.executable, "-m", "streamlit", "run", str(_DASHBOARD_PATH)],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            _TERMINAL_DASHBOARD_APP,
+            "--host",
+            _TERMINAL_DASHBOARD_HOST,
+            "--port",
+            _TERMINAL_DASHBOARD_PORT,
+        ],
         cwd=str(_PROJECT_ROOT),
         check=False,
     )
@@ -86,7 +107,7 @@ if __name__ == "__main__":
                         help="Path to YAML portfolio config")
     parser.add_argument("--dashboard", action="store_true",
                         help=(
-                            "Launch Streamlit dashboard. "
+                            "Launch terminal dashboard. "
                             "When combined with --backtest/--portfolio-backtest, "
                             "opens AFTER the backtest completes. "
                             "Standalone: 'python run.py --dashboard'."
@@ -124,7 +145,7 @@ if __name__ == "__main__":
     # ── Mode: single backtest ─────────────────────────────────────────────────
     if args.backtest:
         from cli.single import run as run_backtest
-        run_backtest(args.strategy, settings, launch_dashboard=False)
+        run_backtest(args.strategy, settings)
         if args.dashboard:
             _launch_dashboard()
 
@@ -138,7 +159,6 @@ if __name__ == "__main__":
         from cli.portfolio import run as run_portfolio
         run_portfolio(
             args.portfolio_config,
-            launch_dashboard=False,
             results_subdir=args.results_subdir,
             scenario_id=args.scenario_id,
             baseline_run_id=args.baseline_run_id,

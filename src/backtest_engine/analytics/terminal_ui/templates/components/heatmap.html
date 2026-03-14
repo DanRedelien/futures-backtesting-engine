@@ -1,0 +1,11 @@
+<section class="terminal-chart-card">
+    <div class="terminal-chart-card__header">
+        <h3>{{ title }}</h3>
+        {% if subtitle %}<span>{{ subtitle }}</span>{% endif %}
+    </div>
+    <div
+        class="terminal-chart terminal-chart--heatmap"
+        data-chart-renderer="heatmap"
+        data-chart-endpoint="{{ endpoint }}"
+    ></div>
+</section>

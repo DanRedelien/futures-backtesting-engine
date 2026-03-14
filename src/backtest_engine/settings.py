@@ -32,6 +32,14 @@ class BacktestSettings(BaseSettings):
     base_dir: Path = Path(__file__).parent.parent.parent
     cache_dir: Path = Field(default=Path("data/cache"), description="Parquet cache location")
     results_dir: Path = Field(default=Path("results"), description="Output directory for reports")
+    terminal_redis_url: Optional[str] = Field(
+        default=None,
+        description="Optional Redis URL used by terminal job queueing and cache services.",
+    )
+    terminal_queue_name: str = Field(
+        default="terminal-scenarios",
+        description="RQ queue name for terminal-driven async scenario jobs.",
+    )
 
     # ── Primary instrument ─────────────────────────────────────────────────────
     default_symbol: str = "ES"
@@ -89,8 +97,13 @@ class BacktestSettings(BaseSettings):
         """Standard pacing delay to respect IB rate limits (~6 req/min)."""
         return 11.0
 
-    # ── Dashboard Analytics ──────────────────────────────────────────────────
-    dashboard: "DashboardSettings" = Field(default_factory=lambda: DashboardSettings())
+    # ── Terminal / analytics UI settings ────────────────────────────────────
+    terminal_ui: "TerminalUISettings" = Field(default_factory=lambda: TerminalUISettings())
+
+    @property
+    def dashboard(self) -> "TerminalUISettings":
+        """Legacy alias kept while older analytics modules finish migrating."""
+        return self.terminal_ui
 
     # ── Walk-Forward Validation (WFV) scheduling ──────────────────────────────
     wfo_n_folds: int = 4             # Number of walk-forward folds
@@ -151,9 +164,9 @@ class BacktestSettings(BaseSettings):
         return self.instrument_specs.get(symbol, {"tick_size": 0.01, "multiplier": 1.0})
 
 
-class DashboardSettings(BaseModel):
+class TerminalUISettings(BaseModel):
     """
-    Settings specifically for the Streamlit analytics dashboard.
+    Settings shared by the Streamlit analytics views and the terminal UI shell.
     """
     # ── 1. Rolling Metrics (Windows) ──────────────────────────────────────────
     rolling_sharpe_window_days: int = Field(
@@ -215,4 +228,88 @@ class DashboardSettings(BaseModel):
     dashboard_stress_commission_default_multiplier: float = Field(
         default=2.0,
         description="Default commission shock multiplier for the dashboard risk tab.",
+    )
+
+    # ── 4. Terminal UI Payload Budgets ────────────────────────────────────────
+    terminal_max_chart_points: int = Field(
+        default=2000,
+        description="Default maximum point budget for terminal chart payloads.",
+    )
+    terminal_trade_page_size: int = Field(
+        default=25,
+        description="Default page size for terminal trade-detail drilldowns.",
+    )
+    terminal_result_bundle_cache_ttl_seconds: float = Field(
+        default=15.0,
+        description="TTL in seconds for the small in-process result-bundle cache.",
+    )
+    terminal_min_correlation_samples: int = Field(
+        default=5,
+        description="Minimum resampled observations required before correlation views are rendered.",
+    )
+
+    # ── 5. Terminal UI Cache Policy ───────────────────────────────────────────
+    terminal_correlation_cache_ttl_seconds: int = Field(
+        default=600,
+        description="TTL in seconds for expensive correlation-matrix payloads.",
+    )
+    terminal_risk_cache_ttl_seconds: int = Field(
+        default=300,
+        description="TTL in seconds for rolling stats and derived risk views.",
+    )
+
+    # ── 6. Terminal UI Async Operations ───────────────────────────────────────
+    terminal_job_timeout_seconds: int = Field(
+        default=1800,
+        description="Timeout in seconds for queued terminal scenario jobs.",
+    )
+    terminal_job_max_retries: int = Field(
+        default=2,
+        description="Maximum retry count for queued terminal scenario jobs.",
+    )
+    terminal_sse_max_updates_per_second: float = Field(
+        default=2.0,
+        description="Maximum SSE update frequency for terminal job progress streams.",
+    )
+
+    # ── 7. Terminal UI Theme ────────────────────────────────────────────────
+    terminal_benchmark_color: str = Field(
+        default="#777777",
+        description="Line color for benchmark overlays in terminal charts.",
+    )
+    terminal_strategy_colors: list[str] = Field(
+        default_factory=lambda: ["#22C55E", "#3B82F6", "#EAB308", "#F97316", "#EC4899", "#A855F7"],
+        description="Palette used for per-strategy chart series in portfolio mode.",
+    )
+    terminal_portfolio_total_color: str = Field(
+        default="#FFFFFF",
+        description="Primary color for the aggregate portfolio or strategy line.",
+    )
+    terminal_long_color: str = Field(
+        default="#22C55E",
+        description="Color used for long-side series in single-mode charts.",
+    )
+    terminal_short_color: str = Field(
+        default="#EF4444",
+        description="Color used for short-side series in single-mode charts.",
+    )
+    terminal_drawdown_color: str = Field(
+        default="#EF4444",
+        description="Color used for drawdown overlays and drawdown charts.",
+    )
+    terminal_rolling_sharpe_color: str = Field(
+        default="#FFFFFF",
+        description="Color used for rolling Sharpe mini-charts.",
+    )
+    terminal_rolling_vol_colors: list[str] = Field(
+        default_factory=lambda: ["#22C55E", "#3B82F6", "#F59E0B"],
+        description="Palette used for rolling-volatility series.",
+    )
+    terminal_stress_colors: list[str] = Field(
+        default_factory=lambda: ["#22C55E", "#F59E0B", "#EF4444"],
+        description="Palette used for stress-preview scenarios.",
+    )
+    terminal_var_colors: list[str] = Field(
+        default_factory=lambda: ["#F59E0B", "#FBBF24", "#EF4444"],
+        description="Palette used for VaR / ES risk overlays.",
     )

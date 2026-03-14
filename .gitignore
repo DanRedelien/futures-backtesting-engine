@@ -12,6 +12,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.pytest_cache/
 
 # Project specifics
 results/

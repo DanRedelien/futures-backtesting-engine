@@ -23,6 +23,7 @@ from src.backtest_engine.analytics.dashboard.core.transforms import (
     compute_pnl_dist_stats,
     compute_rolling_sharpe,
     compute_per_strategy_summary,
+    compute_strategy_stats,
 )
 
 
@@ -210,6 +211,37 @@ def test_per_strategy_summary_trade_counts() -> None:
             f"Trade count mismatch for {strat_name}: "
             f"got {summary[strat_name]['trade_count']}, expected {expected_count}."
         )
+
+
+def test_strategy_stats_contract_uses_trade_stat_semantics() -> None:
+    """Strategy Stats should stay aligned with the shared trade-stat semantics."""
+    slots = {"0": "StrategyA"}
+    trades = pd.DataFrame(
+        {
+            "strategy": ["StrategyA"] * 4,
+            "pnl": [100.0, -40.0, 20.0, -10.0],
+        }
+    )
+
+    stats_frame = compute_strategy_stats(trades, slots)
+
+    assert list(stats_frame.columns) == [
+        "Strategy",
+        "Total Trades",
+        "Win Rate %",
+        "Avg Trade ($)",
+        "Max Loss ($)",
+        "T-Stat",
+        "P-Value",
+    ]
+    assert len(stats_frame) == 1
+
+    row = stats_frame.iloc[0]
+    assert row["Strategy"] == "StrategyA"
+    assert row["Total Trades"] == 4
+    assert math.isclose(float(row["Win Rate %"]), 50.0, rel_tol=1e-9)
+    assert math.isclose(float(row["Avg Trade ($)"]), 17.5, rel_tol=1e-9)
+    assert math.isclose(float(row["Max Loss ($)"]), -40.0, rel_tol=1e-9)
 
 
 # ── Test 7: Empty inputs return empty outputs gracefully ──────────────────────

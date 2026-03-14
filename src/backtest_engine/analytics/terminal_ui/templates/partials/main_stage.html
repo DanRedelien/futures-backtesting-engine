@@ -1,0 +1,30 @@
+<section class="terminal-panel terminal-panel--primary">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Main Equity</h2>
+            <p>Primary chart loads first; lower panels hydrate after the first screen is usable.</p>
+        </div>
+    </div>
+    <div
+        class="terminal-chart terminal-chart--main"
+        data-chart-renderer="equity"
+        data-chart-endpoint="/api/charts/equity"
+    ></div>
+    {% if shell.mode == "portfolio" %}
+    <div
+        class="terminal-chart terminal-chart--mini"
+        data-chart-renderer="line"
+        data-chart-endpoint="/api/charts/rolling-sharpe"
+    ></div>
+    {% endif %}
+</section>
+
+<section class="terminal-panel terminal-panel--scroll">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Terminal Report</h2>
+            <p>Current report output remains the parity oracle for terminal validation.</p>
+        </div>
+    </div>
+    <pre class="terminal-report-full">{{ shell.report_preview }}</pre>
+</section>

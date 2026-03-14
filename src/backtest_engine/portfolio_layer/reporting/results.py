@@ -21,11 +21,16 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from src.backtest_engine.analytics.artifact_contract import (
+    ARTIFACT_SCHEMA_VERSION,
+    build_artifact_identity,
+)
 from src.backtest_engine.serialization import dumps_json
 
 
 # ── Versioning ─────────────────────────────────────────────────────────────────
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = ARTIFACT_SCHEMA_VERSION
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ARTIFACTS = [
     "history.parquet",
     "exposure.parquet",
@@ -212,6 +217,13 @@ def save_portfolio_results(
     }
     if manifest_metadata:
         manifest.update(manifest_metadata)
+    manifest.update(
+        build_artifact_identity(
+            run_type="portfolio",
+            artifact_path=out,
+            project_root=_PROJECT_ROOT,
+        )
+    )
     (out / "manifest.json").write_text(dumps_json(manifest), encoding="utf-8")
 
     # Run type marker for the dashboard

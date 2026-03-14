@@ -8,18 +8,27 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import yaml
 
-from src.backtest_engine.analytics.dashboard.core.components import get_results_dir
 from src.backtest_engine.analytics.dashboard.core.data_layer import ResultBundle
+from src.backtest_engine.analytics.dashboard.core.paths import (
+    get_project_root as resolve_project_root,
+    get_results_dir as resolve_results_dir,
+)
 from src.backtest_engine.analytics.dashboard.risk_analysis.models import StressMultipliers
 from src.backtest_engine.settings import BacktestSettings
 
 
 def get_project_root() -> Path:
-    """Returns the project root resolved from the dashboard results directory."""
-    return get_results_dir().parent
+    """Returns the shared project root from the neutral path helper."""
+    return resolve_project_root()
+
+
+def get_results_dir() -> Path:
+    """Returns the shared results root from the neutral path helper."""
+    return resolve_results_dir()
 
 
 def get_scenarios_root() -> Path:
@@ -47,11 +56,14 @@ def resolve_portfolio_config_path(bundle: ResultBundle) -> Path:
     Resolves the source portfolio config path for scenario reruns.
 
     Methodology:
-        Prefer the manifest-tracked source config path when available. Fall back
-        to the repository's default portfolio config so the dashboard can still
-        launch scenario reruns for baseline artifacts created before config-path
-        metadata was added.
+        The loader does not fall back to an example portfolio config.
+        Older artifacts without reproducibility metadata stay view-only until
+        their rerun contract is explicit and safe.
     """
+    compatibility = bundle.compatibility
+    if compatibility is not None and not compatibility.is_rerunnable:
+        raise ValueError(compatibility.reason)
+
     manifest = bundle.manifest or {}
     source_path = manifest.get("source_config_path")
     if source_path:
@@ -59,7 +71,22 @@ def resolve_portfolio_config_path(bundle: ResultBundle) -> Path:
         if path.exists():
             return path
 
-    return get_project_root() / "src" / "backtest_engine" / "portfolio_layer" / "portfolio_config_example.yaml"
+    raise ValueError(
+        "Baseline artifact is view-only because `source_config_path` is missing "
+        "or no longer exists."
+    )
+
+
+def _build_scenario_id() -> str:
+    """
+    Builds a collision-resistant scenario artifact identifier.
+
+    Methodology:
+        Scenario naming stays collision-resistant so concurrent or
+        repeated reruns cannot collide on second-level timestamps alone.
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    return f"scenario-{timestamp}-{uuid4().hex[:8]}"
 
 
 def _build_scenario_payload(
@@ -114,9 +141,18 @@ def _write_scenario_config(
     return base_target_vol
 
 
-def run_portfolio_scenario(bundle: ResultBundle, stress: StressMultipliers) -> Path:
+def run_portfolio_scenario(
+    bundle: ResultBundle,
+    stress: StressMultipliers,
+    timeout_seconds: Optional[int] = None,
+) -> Path:
     """
     Launches a real portfolio rerun into a separate scenario artifact namespace.
+
+    Args:
+        bundle: Loaded portfolio artifact bundle used as the rerun baseline.
+        stress: User-selected stress multipliers for the rerun.
+        timeout_seconds: Optional subprocess timeout for async worker control.
 
     Returns:
         Path to the scenario results root that contains `.run_type` and the
@@ -125,9 +161,13 @@ def run_portfolio_scenario(bundle: ResultBundle, stress: StressMultipliers) -> P
     if bundle.run_type != "portfolio":
         raise ValueError("Scenario reruns are only supported for portfolio bundles.")
 
+    compatibility = bundle.compatibility
+    if compatibility is not None and not compatibility.is_rerunnable:
+        raise ValueError(compatibility.reason)
+
     settings = BacktestSettings()
     source_config_path = resolve_portfolio_config_path(bundle)
-    scenario_id = datetime.now(timezone.utc).strftime("scenario-%Y%m%d-%H%M%S")
+    scenario_id = _build_scenario_id()
     scenario_root = get_scenarios_root() / scenario_id
     scenario_artifacts_dir = scenario_root / "portfolio"
     scenario_config_path = scenario_root / "scenario_portfolio_config.yaml"
@@ -175,6 +215,7 @@ def run_portfolio_scenario(bundle: ResultBundle, stress: StressMultipliers) -> P
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout_seconds,
     )
     if result.returncode != 0:
         raise RuntimeError(

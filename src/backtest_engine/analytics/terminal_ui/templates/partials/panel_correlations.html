@@ -1,0 +1,33 @@
+<section class="terminal-panel__stack">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Correlations</h2>
+            <p>Strategy PnL and exposure heatmaps stay on the same horizon for direct comparison.</p>
+        </div>
+        {% if is_portfolio %}
+        <div class="terminal-panel__controls">
+            <label class="terminal-field terminal-field--inline">
+                <span>Horizon</span>
+                <select id="correlation-horizon-select" data-base-horizon="{{ horizon }}">
+                    <option value="1d" {% if horizon == "1d" %}selected{% endif %}>1D</option>
+                    <option value="1w" {% if horizon == "1w" %}selected{% endif %}>1W</option>
+                    <option value="1m" {% if horizon == "1m" %}selected{% endif %}>1M</option>
+                </select>
+            </label>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if is_portfolio %}
+    <div class="terminal-split terminal-split--equal" id="correlation-heatmaps">
+        {% with title="Strategy PnL Correlation", subtitle="Incremental PnL, not cumulative equity.", endpoint="/api/charts/strategy-correlation?horizon=" ~ horizon %}
+            {% include "components/heatmap.html" %}
+        {% endwith %}
+        {% with title="Exposure Correlation", subtitle="Absolute notional by instrument.", endpoint="/api/charts/exposure-correlation?horizon=" ~ horizon %}
+            {% include "components/heatmap.html" %}
+        {% endwith %}
+    </div>
+    {% else %}
+    <div class="terminal-empty-state">Single mode reuses the shell and hides unavailable multi-strategy correlation panels.</div>
+    {% endif %}
+</section>

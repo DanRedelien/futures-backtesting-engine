@@ -25,10 +25,16 @@ The portfolio layer separates strategy execution, position tracking, capital all
   - **`strategy_runner.py`**: An isolated execution environment assigned to a specific `StrategySlot`. It handles feeding data to its assigned strategy and translating the strategy's internal signals into unified `TargetPosition` objects for the engine to execute.
 
 - **`reporting/`**
-  - **`results.py`**: Handles compiling the final state of the `PortfolioBook` and execution logs into standard outcome formats. Packages history, trades, and strategy metrics for the `analytics` and `dashboard` layers to consume.
+  - **`results.py`**: Handles compiling the final state of the `PortfolioBook` and execution logs into standard outcome formats. Packages history, trades, and strategy metrics for the analytics exporters, terminal UI, and shared artifact loaders to consume.
 
 - **`scheduling/`**
   - **`scheduler.py`**: Implements temporal logic (e.g., `IntrabarScheduler`, `DailyScheduler`, `WeeklyScheduler`) to govern *when* specific actions like capital rebalancing or performance sweeps occur across the portfolio timeline.
 
 ### Configuration
 - **`portfolio_config_example.yaml`**: A sample configuration file demonstrating how to mathematically describe the portfolio components, initial capital, trading pairs, and assigned strategies for an engine run.
+
+## Output Contract
+
+- Portfolio runs persist their canonical artifact bundle under `results/portfolio/`.
+- Scenario reruns persist namespaced bundles under `results/scenarios/<scenario_id>/portfolio/`.
+- These bundles are consumed by `analytics/dashboard/core/data_layer.py` and the FastAPI terminal UI in `analytics/terminal_ui/`.

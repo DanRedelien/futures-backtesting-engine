@@ -1,0 +1,73 @@
+<section class="terminal-panel__stack">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Risk</h2>
+            <p>{{ profile_label }} profile rendered from canonical transforms only.</p>
+        </div>
+    </div>
+
+    <div class="metric-grid metric-grid--compact">
+        {% for metric in summary_cards %}
+            {% include "components/metric_card.html" %}
+        {% endfor %}
+    </div>
+
+    <div class="terminal-split terminal-split--equal">
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h3>Tail Risk</h3>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="line"
+                data-chart-endpoint="/api/charts/risk-var?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+            ></div>
+        </section>
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h3>Drawdown</h3>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="line"
+                data-chart-endpoint="/api/charts/risk-drawdown?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+            ></div>
+        </section>
+    </div>
+
+    <div class="terminal-split terminal-split--equal">
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h3>Rolling Volatility</h3>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="line"
+                data-chart-endpoint="/api/charts/risk-volatility?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+            ></div>
+        </section>
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h3>Stress Preview</h3>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="line"
+                data-chart-endpoint="/api/charts/risk-stress?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+            ></div>
+        </section>
+    </div>
+
+    {% if scenario_notice %}
+    <div class="terminal-inline-notice">{{ scenario_notice }}</div>
+    {% endif %}
+
+    <section class="terminal-chart-card">
+        <div class="terminal-chart-card__header">
+            <h3>Stress Table</h3>
+        </div>
+        {% set columns = stress_rows[0].keys()|list if stress_rows else [] %}
+        {% set rows = stress_rows %}
+        {% include "components/table.html" with context %}
+    </section>
+</section>

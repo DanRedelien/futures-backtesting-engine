@@ -1,0 +1,24 @@
+{% if rows %}
+<div class="terminal-table-wrap">
+    <table class="terminal-table">
+        <thead>
+            <tr>
+                {% for column in columns %}
+                <th>{{ column }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                {% for column in columns %}
+                <td>{{ row.get(column, "") }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="terminal-empty-state">{{ empty_message or "No data available." }}</div>
+{% endif %}

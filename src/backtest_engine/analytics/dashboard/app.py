@@ -25,7 +25,11 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.backtest_engine.analytics.dashboard.core.data_layer import ResultBundle, load_result_bundle
+from src.backtest_engine.analytics.dashboard.core.data_layer import (
+    ResultBundle,
+    inspect_result_bundle,
+    load_result_bundle,
+)
 from src.backtest_engine.analytics.dashboard.pnl_analysis.drawdown_chart import build_drawdown_figure
 from src.backtest_engine.analytics.dashboard.pnl_analysis.distribution_chart import build_pnl_distribution_figure
 from src.backtest_engine.analytics.dashboard.pnl_analysis.correlation_heatmap import build_correlation_heatmap
@@ -345,31 +349,31 @@ def main() -> None:
     try:
         from src.backtest_engine.settings import BacktestSettings
         _settings = BacktestSettings()
-        dashboard_settings = _settings.dashboard
-        window_days: int  = int(dashboard_settings.rolling_sharpe_window_days)
+        terminal_ui_settings = _settings.terminal_ui
+        window_days: int  = int(terminal_ui_settings.rolling_sharpe_window_days)
         risk_free_rate: float = float(_settings.risk_free_rate)
         instrument_specs: dict = _settings.instrument_specs
         risk_config = RiskDashboardConfig(
-            var_confidence_primary=float(dashboard_settings.dashboard_risk_var_primary_confidence),
-            var_confidence_tail=float(dashboard_settings.dashboard_risk_var_tail_confidence),
-            rolling_var_window_days=int(dashboard_settings.dashboard_risk_rolling_var_window_days),
+            var_confidence_primary=float(terminal_ui_settings.dashboard_risk_var_primary_confidence),
+            var_confidence_tail=float(terminal_ui_settings.dashboard_risk_var_tail_confidence),
+            rolling_var_window_days=int(terminal_ui_settings.dashboard_risk_rolling_var_window_days),
             rolling_vol_windows=(
-                int(dashboard_settings.dashboard_risk_rolling_vol_window_short_days),
-                int(dashboard_settings.dashboard_risk_rolling_vol_window_medium_days),
-                int(dashboard_settings.dashboard_risk_rolling_vol_window_long_days),
+                int(terminal_ui_settings.dashboard_risk_rolling_vol_window_short_days),
+                int(terminal_ui_settings.dashboard_risk_rolling_vol_window_medium_days),
+                int(terminal_ui_settings.dashboard_risk_rolling_vol_window_long_days),
             ),
-            stress_slider_min=float(dashboard_settings.dashboard_stress_slider_min_multiplier),
-            stress_slider_max=float(dashboard_settings.dashboard_stress_slider_max_multiplier),
-            stress_slider_step=float(dashboard_settings.dashboard_stress_slider_step),
+            stress_slider_min=float(terminal_ui_settings.dashboard_stress_slider_min_multiplier),
+            stress_slider_max=float(terminal_ui_settings.dashboard_stress_slider_max_multiplier),
+            stress_slider_step=float(terminal_ui_settings.dashboard_stress_slider_step),
             stress_defaults=StressMultipliers(
-                volatility=float(dashboard_settings.dashboard_stress_volatility_default_multiplier),
-                slippage=float(dashboard_settings.dashboard_stress_slippage_default_multiplier),
-                commission=float(dashboard_settings.dashboard_stress_commission_default_multiplier),
+                volatility=float(terminal_ui_settings.dashboard_stress_volatility_default_multiplier),
+                slippage=float(terminal_ui_settings.dashboard_stress_slippage_default_multiplier),
+                commission=float(terminal_ui_settings.dashboard_stress_commission_default_multiplier),
             ),
         )
     except Exception as exc:
         settings_warning = (
-            "Dashboard settings could not be loaded from `BacktestSettings.dashboard`; "
+            "Dashboard settings could not be loaded from `BacktestSettings.terminal_ui`; "
             f"falling back to safe defaults. Details: {exc}"
         )
         window_days = 90   # safe default
@@ -401,15 +405,25 @@ def main() -> None:
     bundle = load_result_bundle()
 
     if bundle is None:
+        load_status = inspect_result_bundle()
         st.title("Backtest Dashboard")
-        st.error(
-            "No backtest results found in `results/`. "
-            "Run a backtest first:\n\n"
-            "```\npython run.py --backtest --strategy <name>\n"
-            "python run.py --portfolio-backtest\n```\n\n"
-            "Then open the dashboard separately:\n\n"
-            "```\nstreamlit run src/backtest_engine/analytics/dashboard/app.py\n```"
-        )
+        if load_status.state == "incomplete":
+            missing_suffix = ""
+            if load_status.missing_files:
+                missing_suffix = f" Missing: {', '.join(load_status.missing_files)}."
+            st.error(
+                "Backtest artifacts are incomplete and were not loaded. "
+                f"{load_status.reason}{missing_suffix}"
+            )
+        else:
+            st.error(
+                "No backtest results found in `results/`. "
+                "Run a backtest first:\n\n"
+                "```\npython run.py --backtest --strategy <name>\n"
+                "python run.py --portfolio-backtest\n```\n\n"
+                "Then open the dashboard separately:\n\n"
+                "```\nstreamlit run src/backtest_engine/analytics/dashboard/app.py\n```"
+            )
         return
 
     mode_label = "Portfolio" if bundle.run_type == "portfolio" else "Single-Asset"

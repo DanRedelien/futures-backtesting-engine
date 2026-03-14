@@ -9,7 +9,11 @@ from typing import Dict
 import pandas as pd
 import streamlit as st
 
-from src.backtest_engine.analytics.dashboard.core.data_layer import ResultBundle, load_result_bundle
+from src.backtest_engine.analytics.dashboard.core.data_layer import (
+    ResultBundle,
+    inspect_result_bundle,
+    load_result_bundle,
+)
 from src.backtest_engine.analytics.dashboard.core.scenario_runner import (
     list_portfolio_scenarios,
     run_portfolio_scenario,
@@ -389,7 +393,17 @@ def _render_scenario_backtest_section(
         "commission scales `commission_rate`, and slippage scales `max_slippage_ticks`."
     )
 
-    if st.button("Run Scenario Backtest", key="run_portfolio_scenario_button"):
+    rerun_block_reason = ""
+    if bundle.compatibility is not None and not bundle.compatibility.is_rerunnable:
+        rerun_block_reason = bundle.compatibility.reason
+        st.info(rerun_block_reason)
+
+    if st.button(
+        "Run Scenario Backtest",
+        key="run_portfolio_scenario_button",
+        disabled=bool(rerun_block_reason),
+        help=rerun_block_reason or None,
+    ):
         with st.spinner("Running scenario backtest..."):
             try:
                 scenario_root = run_portfolio_scenario(bundle, stress_multipliers)
@@ -423,7 +437,11 @@ def _render_scenario_backtest_section(
     selected_scenario = next(item for item in scenarios if item["label"] == selected_label)
     scenario_bundle = load_result_bundle(results_dir=str(selected_scenario["root"]))
     if scenario_bundle is None:
-        st.error("Selected scenario artifacts could not be loaded.")
+        load_status = inspect_result_bundle(results_dir=str(selected_scenario["root"]))
+        if load_status.state == "incomplete":
+            st.error(f"Selected scenario artifacts are incomplete: {load_status.reason}")
+        else:
+            st.error("Selected scenario artifacts could not be loaded.")
         return
     if not scenario_matches_baseline(bundle, scenario_bundle):
         st.warning(

@@ -3,15 +3,13 @@ cli/single.py
 
 Single-asset backtest CLI handler.
 
-Responsibility: Parse strategy name, run BacktestEngine, and optionally launch
-the Streamlit dashboard.  Called by run.py --backtest.
+Responsibility: Parse strategy name and run BacktestEngine.
+Called by run.py --backtest.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 from src.data.data_lake import DataLake
@@ -34,14 +32,13 @@ def _load_strategy(name: str) -> Any:
         print(f"[Error] {e}")
         sys.exit(1)
 
-def run(strategy_name: str, settings: Any, launch_dashboard: bool = False) -> None:
+def run(strategy_name: str, settings: Any) -> None:
     """
-    Runs a single-asset backtest and optionally launches the dashboard.
+    Runs a single-asset backtest.
 
     Args:
         strategy_name: Short strategy name (e.g. 'zscore').
         settings: BacktestSettings instance.
-        launch_dashboard: If True, launch Streamlit after the backtest.
     """
     from src.backtest_engine.engine import BacktestEngine
 
@@ -72,15 +69,3 @@ def run(strategy_name: str, settings: Any, launch_dashboard: bool = False) -> No
     engine = BacktestEngine(settings=settings)
     engine.run(strategy_class)
     engine.show_results()
-
-    if launch_dashboard:
-        dashboard_path = (
-            Path(__file__).parent.parent
-            / "src" / "backtest_engine" / "analytics" / "dashboard" / "app.py"
-        )
-        print("\n[Dashboard] Launching Streamlit dashboard...")
-        subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(dashboard_path)],
-            cwd=str(Path(__file__).parent.parent),
-            check=False,
-        )

@@ -1,0 +1,29 @@
+<section class="terminal-panel__stack">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>PnL Distribution</h2>
+            <p>Daily PnL distribution rendered from the canonical transform layer.</p>
+        </div>
+    </div>
+
+    <div class="metric-grid metric-grid--compact">
+        {% set metrics = [
+            {"label": "Mean", "value": summary.get("mean", "N/A")},
+            {"label": "Std", "value": summary.get("std", "N/A")},
+            {"label": "Skew", "value": summary.get("skew", "N/A")},
+            {"label": "Kurtosis", "value": summary.get("kurtosis", "N/A")},
+            {"label": "VaR 95", "value": summary.get("var_95", "N/A")},
+            {"label": "CVaR 95", "value": summary.get("cvar_95", "N/A")},
+            {"label": "VaR 99", "value": summary.get("var_99", "N/A")}
+        ] %}
+        {% for metric in metrics %}
+            {% include "components/metric_card.html" %}
+        {% endfor %}
+    </div>
+
+    <div
+        class="terminal-chart terminal-chart--large"
+        data-chart-renderer="distribution"
+        data-chart-endpoint="/api/charts/pnl-distribution"
+    ></div>
+</section>

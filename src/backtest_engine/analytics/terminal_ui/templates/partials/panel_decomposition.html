@@ -1,0 +1,19 @@
+<section class="terminal-panel__stack">
+    <div class="terminal-panel__header">
+        <div>
+            <h2>Strategy Decomposition</h2>
+            <p>Portfolio-only decomposition sourced from the canonical transform layer.</p>
+        </div>
+    </div>
+
+    {% if is_available %}
+    {% include "components/table.html" with context %}
+    <div
+        class="terminal-chart terminal-chart--large"
+        data-chart-renderer="bar"
+        data-chart-endpoint="/api/charts/decomposition"
+    ></div>
+    {% else %}
+    <div class="terminal-empty-state">No multi-strategy decomposition is available for this run type.</div>
+    {% endif %}
+</section>

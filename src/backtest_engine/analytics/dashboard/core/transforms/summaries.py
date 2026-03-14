@@ -2,15 +2,12 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
-import scipy.stats as stats
+import scipy.stats as scipy_stats
 from .pnl import (
     build_bar_pnl_matrix,
     build_strategy_equity_curve,
-    resample_pnl_to_horizon,
-    _HORIZON_RULE,
-    compute_pnl_dist_stats as _compute_pnl_dist_stats,
 )
-from .correlations import _MIN_CORR_SAMPLES
+from .strategy_stats import compute_strategy_stats_map
 
 def compute_strategy_decomp(
     trades_df: pd.DataFrame,
@@ -184,189 +181,6 @@ def compute_strategy_decomp(
 
 
 
-# ── Strategy Correlation ───────────────────────────────────────────────────────
-
-def compute_strategy_correlation(
-    bar_pnl_matrix: pd.DataFrame,
-    horizon: str = "1d",
-) -> pd.DataFrame:
-    """
-    Computes a Pearson correlation matrix of per-strategy incremental PnL.
-
-    Methodology:
-        Correlation is computed on *bar/daily PnL series*, not cumulative equity.
-        Cumulative equity correlations are artificially inflated by shared drift
-        and are meaningless for risk decomposition.
-
-        Horizon resampling lets the user detect correlations that appear only
-        at longer time scales (e.g. independent intrabar but correlated daily).
-
-    Args:
-        bar_pnl_matrix: Output of build_bar_pnl_matrix() — incremental PnL.
-        horizon: Resampling horizon ('1d', '1w', '1m').
-
-    Returns:
-        Correlation DataFrame (strategies x strategies). Empty if < 2 strategies
-        or too few observations after resampling.
-    """
-    if bar_pnl_matrix.empty or bar_pnl_matrix.shape[1] < 2:
-        return pd.DataFrame()
-
-    resampled = resample_pnl_to_horizon(bar_pnl_matrix, horizon)
-    if len(resampled) < _MIN_CORR_SAMPLES:
-        return pd.DataFrame()
-    return resampled.corr(method="pearson")
-
-
-# ── Exposure Correlation ───────────────────────────────────────────────────────
-
-def compute_exposure_correlation(
-    exposure_df: pd.DataFrame,
-    horizon: str = "1d",
-) -> pd.DataFrame:
-    """
-    Computes correlation between per-instrument absolute exposures.
-
-    Methodology:
-        Step 1: Keep only `*_notional` columns.
-        Step 2: Aggregate by symbol — sum slot_N_SYM_notional across all slots.
-        Step 3: Resample using `mean()` (average active exposure per period). 
-                We use the raw exposure, NOT the ratio to total gross_exposure. 
-                Using the ratio crushes the variance and leads to 0.00 correlation
-                for larger horizons when one strategy's exposure dominates.
-        Step 4: Compute Pearson correlation on the resampled absolute levels.
-
-    Args:
-        exposure_df: Raw bar-level exposure DataFrame with columns like
-                     `slot_0_NQ_notional`.
-        horizon: Resampling horizon '1d', '1w', '1m' (default: '1d').
-
-    Returns:
-        Correlation matrix (symbols x symbols). Empty if < 2 distinct symbols
-        or too few samples.
-    """
-    if exposure_df is None or exposure_df.empty:
-        return pd.DataFrame()
-
-    # Step 1: keep only notional columns
-    notional_cols = [c for c in exposure_df.columns if c.endswith("_notional")]
-    if not notional_cols:
-        notional_cols = exposure_df.columns.tolist()
-
-    df = exposure_df[notional_cols].copy()
-
-    # Step 2: extract symbol name (slot_N_SYM_notional -> SYM)
-    symbol_map: dict = {}
-    for col in notional_cols:
-        parts = col.split("_")
-        if len(parts) >= 4 and parts[0] == "slot" and parts[-1] == "notional":
-            sym = "_".join(parts[2:-1])
-        else:
-            sym = col
-        symbol_map[col] = sym
-
-    # Step 3: sum per-symbol notional across all slots
-    symbol_notional: dict = {}
-    for col, sym in symbol_map.items():
-        symbol_notional[sym] = symbol_notional.get(sym, 0.0) + df[col].fillna(0.0)
-
-    sym_df = pd.DataFrame(symbol_notional, index=df.index)
-
-    if sym_df.shape[1] < 2:
-        return pd.DataFrame()
-
-    # Step 4: resample using MEAN (average absolute exposure level)
-    # This provides a more robust correlation measure for longer intervals.
-    rule = _HORIZON_RULE.get(horizon, "1D")
-    resampled = sym_df.abs().resample(rule).mean()
-
-    if len(resampled) < _MIN_CORR_SAMPLES:
-        return pd.DataFrame()
-
-    # Step 5: drop columns with near-zero variance (always flat strategy)
-    active_cols = [c for c in resampled.columns if resampled[c].std() > 1e-8]
-    if len(active_cols) < 2:
-        return pd.DataFrame()
-
-    return resampled[active_cols].corr(method="pearson")
-
-
-# ── Rolling Sharpe ─────────────────────────────────────────────────────────────
-
-def compute_rolling_sharpe(
-    history: pd.DataFrame,
-    window_days: int = 90,
-    bars_per_day: float = 13.0,
-    risk_free_rate: float = 0.0,
-) -> pd.Series:
-    """
-    Computes rolling Sharpe ratio on *daily* equity returns.
-
-    Methodology:
-        Step 1: Resample bar-level equity to end-of-day snapshots.
-        Step 2: Compute daily percentage returns:
-                  r_t = equity_t / equity_{t-1} - 1
-        Step 3: Rolling window = window_days calendar days.
-        Step 4: Annualise by sqrt(252).
-
-        Using *daily* returns instead of bar-level returns avoids the
-        +/-10-15 Sharpe artefact caused by near-zero intraday return std.
-
-        The std guard (std < 1e-8) prevents division by near-zero when the
-        strategy is flat for extended periods.
-
-    Args:
-        history: Portfolio history with 'total_value'.
-        window_days: Rolling window in calendar days (default: 90 from settings).
-        bars_per_day: Not used for computation — stored for reference only.
-        risk_free_rate: Annualised risk-free rate (default 0).
-
-    Returns:
-        pd.Series of daily rolling Sharpe values (indexed by date).
-    """
-    if history.empty or "total_value" not in history.columns:
-        return pd.Series(dtype=float)
-
-    # Step 1: resample to end-of-day equity level
-    daily_equity: pd.Series = (
-        history["total_value"]
-        .resample("1D")
-        .last()
-        .dropna()
-    )
-
-    if len(daily_equity) < 3:
-        return pd.Series(dtype=float)
-
-    # Step 2: daily returns (not PnL — must be return = equity_t/equity_{t-1} - 1)
-    daily_ret: pd.Series = daily_equity.pct_change(fill_method=None).dropna()
-
-    ann_factor: float = np.sqrt(252.0)
-    rf_daily:   float = risk_free_rate / 252.0
-
-    # Step 3: rolling window in days
-    rolling_mean: pd.Series = (daily_ret - rf_daily).rolling(
-        window=window_days, min_periods=max(window_days // 2, 5)
-    ).mean()
-    rolling_std: pd.Series = daily_ret.rolling(
-        window=window_days, min_periods=max(window_days // 2, 5)
-    ).std()
-
-    # Step 4: Sharpe — clip std at 1e-8 to prevent inf on flat periods
-    safe_std: pd.Series = rolling_std.clip(lower=1e-8)
-    return (rolling_mean / safe_std) * ann_factor
-
-
-# ── PnL Distribution Stats ─────────────────────────────────────────────────────
-
-def compute_pnl_dist_stats(
-    daily_pnl: pd.Series,
-    var_confidence: float = 0.95,
-) -> Dict[str, float]:
-    """Backward-compatible wrapper around the shared PnL distribution helper."""
-    return _compute_pnl_dist_stats(daily_pnl, var_confidence=var_confidence)
-
-
 # ── Per-strategy summary for equity hover tooltip ──────────────────────────────
 
 
@@ -399,53 +213,28 @@ def compute_per_strategy_summary(
         Dict {strategy_name: {metric_name: value}}.
     """
     result: Dict[str, Dict[str, object]] = {}
+    strategy_stats_map = compute_strategy_stats_map(trades_df=trades_df, slots=slots)
 
-    if trades_df is None or trades_df.empty or "strategy" not in trades_df.columns:
+    if not strategy_stats_map:
         return result
-
-    # Portfolio initial capital to convert slot $ PnL to % return for regression
-    try:
-        from src.backtest_engine.settings import BacktestSettings
-        initial_cap = float(BacktestSettings().initial_capital)
-    except Exception:
-        initial_cap = 1_000_000.0
-
-    if history is not None and not history.empty and "total_value" in history.columns:
-        initial_cap = float(history["total_value"].iloc[0])
 
     for str_id, strat_name in slots.items():
         sub: pd.DataFrame = trades_df[trades_df["strategy"] == strat_name]
-        
-        # Default stats structure
+        base_stats = strategy_stats_map.get(strat_name, {})
+        pnls = sub["pnl"].astype(float).dropna() if "pnl" in sub.columns else pd.Series(dtype=float)
         stats_dict = {
-            "total_pnl":   0.0,
-            "trade_count": 0,
-            "win_rate":    0.0,
-            "avg_trade":   0.0,
-            "max_loss":    0.0,
-            "tstat":       0.0,
-            "pvalue":      1.0,
-            "alpha":       0.0,
-            "alpha_p":     1.0,
-            "beta":        0.0,
-            "beta_p":      1.0,
+            "total_pnl": round(float(pnls.sum()), 0) if not pnls.empty else 0.0,
+            "trade_count": int(base_stats.get("trade_count", 0)),
+            "win_rate": float(base_stats.get("win_rate_pct", 0.0)),
+            "avg_trade": round(float(base_stats.get("avg_trade", 0.0)), 0),
+            "max_loss": round(float(base_stats.get("max_loss", 0.0)), 0),
+            "tstat": float(base_stats.get("tstat", 0.0)),
+            "pvalue": float(base_stats.get("pvalue", 1.0)),
+            "alpha": 0.0,
+            "alpha_p": 1.0,
+            "beta": 0.0,
+            "beta_p": 1.0,
         }
-        
-        if not sub.empty:
-            pnls: pd.Series    = sub["pnl"]
-            winners: pd.Series = pnls[pnls > 0]
-            
-            stats_dict["total_pnl"]   = round(float(pnls.sum()), 0)
-            stats_dict["trade_count"] = len(sub)
-            stats_dict["win_rate"]    = round(float(len(winners) / len(pnls) * 100), 1)
-            stats_dict["avg_trade"]   = round(float(pnls.mean()), 0)
-            stats_dict["max_loss"]    = round(float(pnls.min()), 0)
-
-            # T-Stat and P-Value
-            if len(pnls) > 1 and pnls.std() > 0:
-                t_stat, p_val = stats.ttest_1samp(pnls, 0.0)
-                stats_dict["tstat"] = float(t_stat)
-                stats_dict["pvalue"] = float(p_val)
 
         # Alpha & Beta Calculation
         if history is not None and instrument_closes is not None and not sub.empty:
@@ -486,7 +275,7 @@ def compute_per_strategy_summary(
                         y = aligned.iloc[:, 0].values
                         x = aligned.iloc[:, 1].values
 
-                        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+                        slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(x, y)
 
                         stats_dict["beta"]   = float(slope)
                         stats_dict["beta_p"] = float(p_value)
@@ -509,7 +298,7 @@ def compute_per_strategy_summary(
                             )
                             if np.isfinite(se_intercept) and se_intercept > 0:
                                 t_alpha   = intercept / se_intercept
-                                alpha_pval = stats.t.sf(np.abs(t_alpha), n - 2) * 2
+                                alpha_pval = scipy_stats.t.sf(np.abs(t_alpha), n - 2) * 2
                                 stats_dict["alpha_p"] = float(alpha_pval)
 
         result[strat_name] = stats_dict

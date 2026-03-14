@@ -1,9 +1,19 @@
 from __future__ import annotations
+from functools import lru_cache
 from typing import Dict, List
 import pandas as pd
 from .pnl import resample_pnl_to_horizon, _HORIZON_RULE
 
-_MIN_CORR_SAMPLES: int = 5
+
+@lru_cache(maxsize=1)
+def _min_corr_samples() -> int:
+    """Loads the minimum sample count required for correlation views."""
+    try:
+        from src.backtest_engine.settings import BacktestSettings
+
+        return int(BacktestSettings().terminal_ui.terminal_min_correlation_samples)
+    except Exception:
+        return 5
 
 def compute_strategy_correlation(
     bar_pnl_matrix: pd.DataFrame,
@@ -32,7 +42,7 @@ def compute_strategy_correlation(
         return pd.DataFrame()
 
     resampled = resample_pnl_to_horizon(bar_pnl_matrix, horizon)
-    if len(resampled) < _MIN_CORR_SAMPLES:
+    if len(resampled) < _min_corr_samples():
         return pd.DataFrame()
     return resampled.corr(method="pearson")
 
@@ -105,7 +115,7 @@ def compute_exposure_correlation(
 
     for c in resampled.columns:
         valid_samples = resampled[c].notna().sum()
-        if valid_samples < _MIN_CORR_SAMPLES:
+        if valid_samples < _min_corr_samples():
             dropped_cols.append(c)
         elif resampled[c].std() <= 1e-8:
             dropped_cols.append(c)

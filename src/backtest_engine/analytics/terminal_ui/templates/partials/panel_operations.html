@@ -1,0 +1,169 @@
+<section class="terminal-panel__stack">
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Scenario Operations</h2>
+                <p>Queue heavy portfolio reruns through the async scenario pipeline.</p>
+            </div>
+        </div>
+
+        {% if queue_message %}
+        <div class="terminal-inline-notice">{{ queue_message }}</div>
+        {% endif %}
+
+        <div class="metric-grid metric-grid--compact">
+            <div class="metric-card">
+                <span class="metric-card__label">Queue</span>
+                <span class="metric-card__value">{{ "Online" if queue_status.available else "Offline" }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Timeout</span>
+                <span class="metric-card__value">{{ queue_status.timeout_seconds }}s</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Retries</span>
+                <span class="metric-card__value">{{ queue_status.max_retries }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Failure State</span>
+                <span class="metric-card__value">{{ queue_status.failure_state }}</span>
+            </div>
+        </div>
+
+        <div class="terminal-inline-notice">{{ queue_status.limitations }}</div>
+
+        {% if can_queue_scenario %}
+        <form
+            class="terminal-inline-form"
+            hx-post="/partials/queue-scenario"
+            hx-target="#bottom-panel"
+            hx-include="#dashboard-filters"
+            hx-swap="innerHTML"
+        >
+            <button class="terminal-button" type="submit">Queue Scenario Rerun</button>
+        </form>
+        {% else %}
+        <div class="terminal-inline-notice">{{ queue_block_reason }}</div>
+        {% endif %}
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Active Job</h2>
+                <p>Progress streams over SSE with throttled updates.</p>
+            </div>
+        </div>
+
+        {% if active_job %}
+        <div
+            class="terminal-job-card"
+            data-job-stream-url="/api/jobs/{{ active_job.job_id }}/events"
+            data-selected-job-id="{{ active_job.job_id }}"
+        >
+            <div class="terminal-job-card__row">
+                <span>Job</span>
+                <strong>{{ active_job.job_id }}</strong>
+            </div>
+            <div class="terminal-job-card__row">
+                <span>Status</span>
+                <strong data-job-field="status">{{ active_job.status }}</strong>
+            </div>
+            <div class="terminal-job-card__row">
+                <span>Progress</span>
+                <strong>
+                    <span data-job-field="progress_current">{{ active_job.progress_current }}</span>
+                    /
+                    <span data-job-field="progress_total">{{ active_job.progress_total }}</span>
+                </strong>
+            </div>
+            <div class="terminal-progress">
+                <div
+                    class="terminal-progress__bar"
+                    data-job-field="progress_bar"
+                    data-progress-pct="{{ active_job.progress_pct }}"
+                    style="width: 0%;"
+                ></div>
+            </div>
+            <div class="terminal-job-card__message" data-job-field="progress_message">{{ active_job.progress_message or "Waiting for worker." }}</div>
+            <div class="terminal-job-card__row">
+                <span>Duration</span>
+                <strong data-job-field="duration_seconds">
+                    {% if active_job.duration_seconds is not none %}
+                    {{ "%.1f"|format(active_job.duration_seconds) }}s
+                    {% else %}
+                    N/A
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="terminal-job-card__row">
+                <span>Output</span>
+                <strong data-job-field="output_artifact_path">{{ active_job.output_artifact_path or "Pending" }}</strong>
+            </div>
+            <div class="terminal-job-card__row">
+                <span>Error</span>
+                <strong data-job-field="last_error">{{ active_job.last_error or "None" }}</strong>
+            </div>
+        </div>
+        {% else %}
+        <div class="terminal-empty-state">No scenario jobs have been queued yet.</div>
+        {% endif %}
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Recent Jobs</h2>
+                <p>Queued, running, failed, timeout, and completed jobs remain visible for debugging.</p>
+            </div>
+        </div>
+
+        {% if jobs %}
+        <div class="terminal-table-wrap">
+            <table class="terminal-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Baseline</th>
+                        <th>Output</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in jobs %}
+                    <tr>
+                        <td>{{ job.job_id }}</td>
+                        <td>{{ job.status }}</td>
+                        <td>{{ job.created_at }}</td>
+                        <td>{{ job.baseline_run_id }}</td>
+                        <td>{{ job.output_artifact_path or "Pending" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="terminal-empty-state">No job metadata found.</div>
+        {% endif %}
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Simulation Backlog</h2>
+                <p>`simulation_analysis` stays a reserved placeholder until future implementation work begins.</p>
+            </div>
+        </div>
+
+        {% if simulation_backlog %}
+        <ul class="terminal-list">
+            {% for item in simulation_backlog %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="terminal-empty-state">Simulation backlog items have not been documented yet.</div>
+        {% endif %}
+    </article>
+</section>

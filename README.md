@@ -1,7 +1,6 @@
-# Single Asset Backtester
+# Backtesting Platform
 
-A high-performance, event-driven backtesting engine designed for rapid hypothesis testing and rigorous statistical validation of alpha strategies.
-The pipeline specifically addresses the problem of hidden look-ahead bias in algorithmic trading and provides strict risk assessment through Out-of-Sample (OOS) Walk-Forward Validation.
+A futures-focused backtesting platform for single-strategy research, portfolio backtests, walk-forward validation, and terminal-style analytics review.
 
 ## Problem Statement
 
@@ -74,20 +73,42 @@ Optimization on minute-level data over 2-year periods is heavily vectorized:
 ## Project Structure
 
 ```bash
+├── README.md
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── MODULE_MAP.md
+│   └── agents.md
+├── cli/
+│   ├── single.py
+│   ├── portfolio.py
+│   └── wfo.py
 ├── run.py
 ├── requirements.txt
+├── tests/
+│   ├── README.md
+│   ├── regression/
+│   ├── unit/
+│   ├── test_engine_integration.py
+│   ├── test_invariants.py
+│   ├── test_kalman.py
+│   └── test_beta.py
 ├── src/
 │   ├── backtest_engine/
+│   │   ├── settings.py
 │   │   ├── engine.py
-│   │   └── optimization/
-│   │       └── wfv_optimizer.py
-│   └── strategies/
-│       ├── base.py
-│       ├── filters.py
-│       └── sma_crossover.py
-└── tests/
-    ├── test_invariants.py
-    └── test_kalman.py
+│   │   ├── execution.py
+│   │   ├── optimization/
+│   │   ├── analytics/
+│   │   │   ├── dashboard/
+│   │   │   └── terminal_ui/
+│   │   └── portfolio_layer/
+│   ├── strategies/
+│   │   ├── base.py
+│   │   ├── registry.py
+│   │   └── *.py
+│   └── data/
+│       └── data_lake.py
+└── TODO.md
 ```
 
 ## Usage
@@ -95,12 +116,25 @@ Optimization on minute-level data over 2-year periods is heavily vectorized:
 ```bash
 pip install -r requirements.txt
 
-# Run a single standard backtest:
+# Run a single standard backtest
 python run.py --backtest --strategy sma
 
-# Run Walk-Forward Validation (WFO) optimization:
+# Run a portfolio backtest
+python run.py --portfolio-backtest --portfolio-config portfolio_config.yaml
+
+# Launch the terminal dashboard for the latest artifacts
+python run.py --dashboard
+
+# Run Walk-Forward Validation (WFO) optimization
 python run.py --wfo --strategy mean_rev
 ```
+
+## Outputs
+
+- Single runs write artifacts to `results/`.
+- Portfolio runs write artifacts to `results/portfolio/`.
+- Scenario reruns write namespaced artifacts under `results/scenarios/`.
+- The active web dashboard is the FastAPI terminal UI in `src/backtest_engine/analytics/terminal_ui/`.
 
 ## Future Improvements
 
