@@ -64,8 +64,8 @@ class PortfolioBook:
         # Exposure snapshot history: list of dicts → used for get_exposure_df()
         self._exposure_history: List[Dict[str, Any]] = []
 
-        # Last-known close price per symbol (prevents gap-bar zero-valuation)
-        self._last_prices: Dict[str, float] = {}
+        # Last-known close price per (slot_id, symbol) (prevents gap-bar zero-valuation)
+        self._last_prices: Dict[Tuple[int, str], float] = {}
 
     # ── Position updates ───────────────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ class PortfolioBook:
 
     def mark_to_market(
         self,
-        current_prices: Dict[str, float],
+        current_prices: Dict[Tuple[int, str], float],
         instrument_specs: Dict[str, Dict],
     ) -> None:
         """
@@ -152,7 +152,7 @@ class PortfolioBook:
         Uses _last_prices cache so gap bars do not zero-value open positions.
 
         Args:
-            current_prices: Symbol → latest close price (current bar only).
+            current_prices: (slot_id, symbol) → latest close price (current bar only).
             instrument_specs: Symbol → {multiplier, tick_size}.
         """
         self.holdings_value = 0.0
@@ -161,9 +161,10 @@ class PortfolioBook:
         for (slot_id, symbol), qty in self.positions.items():
             if abs(qty) < 1e-9:
                 continue
-            if symbol in current_prices:
-                self._last_prices[symbol] = current_prices[symbol]
-            price = self._last_prices.get(symbol, 0.0)
+            key = (slot_id, symbol)
+            if key in current_prices:
+                self._last_prices[key] = current_prices[key]
+            price = self._last_prices.get(key, 0.0)
             spec = instrument_specs.get(symbol, {"multiplier": 1.0})
             multiplier = spec["multiplier"]
 
@@ -214,7 +215,7 @@ class PortfolioBook:
         # Exposure snapshot: qty + notional per (slot, symbol)
         exp_row: Dict[str, Any] = {"timestamp": timestamp}
         for (slot_id, symbol), qty in self.positions.items():
-            price = self._last_prices.get(symbol, 0.0)
+            price = self._last_prices.get((slot_id, symbol), 0.0)
             multiplier = 1.0
             if instrument_specs:
                 multiplier = instrument_specs.get(symbol, {}).get("multiplier", 1.0)

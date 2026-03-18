@@ -24,6 +24,6 @@
     <div
         class="terminal-chart terminal-chart--large terminal-chart--fill"
         data-chart-renderer="distribution"
-        data-chart-endpoint="/api/charts/pnl-distribution"
+        data-chart-endpoint="/api/charts/pnl-distribution?risk_scope={{ active_risk_scope|urlencode }}"
     ></div>
 </section>

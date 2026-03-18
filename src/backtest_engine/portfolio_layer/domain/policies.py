@@ -18,9 +18,9 @@ def _default_commission_rate() -> float:
     from src.backtest_engine.settings import BacktestSettings
     return BacktestSettings().commission_rate
 
-def _default_max_slippage_ticks() -> int:
+def _default_spread_ticks() -> int:
     from src.backtest_engine.settings import BacktestSettings
-    return BacktestSettings().max_slippage_ticks
+    return BacktestSettings().spread_ticks
 
 
 class RebalancePolicy(str, Enum):
@@ -44,8 +44,9 @@ class ExecutionPolicy:
 
     Attributes:
         commission_rate: Dollar commission charged per contract per fill.
-        max_slippage_ticks: Maximum random slippage ticks applied at fill.
-            Actual slippage is drawn uniformly from [0, max_slippage_ticks].
+        spread_ticks: Base tick count applied as a deterministic spread at fill.
+            The active spread mode (static or adaptive_volatility) is configured
+            in BacktestSettings.spread_mode.
     """
     commission_rate: float = field(default_factory=_default_commission_rate)
-    max_slippage_ticks: int = field(default_factory=_default_max_slippage_ticks)
+    spread_ticks: int = field(default_factory=_default_spread_ticks)

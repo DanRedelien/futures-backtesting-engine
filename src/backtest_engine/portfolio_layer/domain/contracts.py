@@ -6,7 +6,7 @@ Top-level portfolio configuration contracts.
 Responsibility: PortfolioConfig and StrategySlot define the shape of user-
 facing YAML configuration only.  No computation or I/O here.
 
-Execution settings (commission_rate, max_slippage_ticks) and kill-switch
+Execution settings (commission_rate, spread_ticks, spread_mode) and kill-switch
 thresholds (max_daily_loss, max_drawdown_pct, max_account_floor) live in
 BacktestSettings (settings.py) to avoid duplication.
 """
@@ -47,7 +47,7 @@ class PortfolioConfig:
     Top-level portfolio backtest configuration.
 
     Only portfolio-specific settings live here.  Execution parameters
-    (commission_rate, max_slippage_ticks) and risk kill-switch thresholds
+    (commission_rate, spread_ticks, spread_mode) and risk kill-switch thresholds
     are read from BacktestSettings to keep a single source of truth.
 
     Attributes:

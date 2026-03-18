@@ -13,7 +13,10 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from src.data.data_lake import DataLake
 
 
 _DATA_VERSION_DIGEST_LENGTH = 16
@@ -61,8 +64,8 @@ def run(
         Reads the YAML once with safe_load.  Portfolio-specific fields
         (target_portfolio_vol, vol_lookback_bars, max_contracts_per_slot,
         rebalance_frequency) come from the YAML.  Shared execution settings
-        (commission_rate, max_slippage_ticks, initial_capital, kill-switch
-        thresholds) are read from BacktestSettings (settings.py).
+        (commission_rate, spread_ticks, spread_mode, initial_capital,
+        kill-switch thresholds) are read from BacktestSettings (settings.py).
 
     Args:
         config_path: Path to the YAML config file (absolute or project-relative).
@@ -166,7 +169,8 @@ def run(
         "run_kind": "scenario" if scenario_id else "baseline",
         "source_config_path": str(cfg_path.resolve()),
         "config_hash": config_hash,
-        "run_seed": settings.random_seed,
+        "spread_mode": settings.spread_mode,
+        "spread_ticks": settings.spread_ticks,
         "data_version": data_version,
     }
     if scenario_id:

@@ -6,6 +6,7 @@ import numpy as np
 from src.backtest_engine.analytics.dashboard.core.data_layer import ResultBundle
 from src.backtest_engine.analytics.dashboard.risk_analysis.models import StressMultipliers
 from src.backtest_engine.analytics.terminal_ui.constants import (
+    DEFAULT_RISK_VOL_WINDOW_DAYS,
     DEFAULT_RISK_SHARPE_HORIZON,
     LABEL_PEAK_THRESHOLD,
 )
@@ -78,8 +79,6 @@ def _build_risk_panel_context_uncached(
     *,
     risk_scope: str,
     stress: StressMultipliers,
-    risk_vol_window_days: int,
-    risk_sharpe_horizon: str,
 ) -> Dict[str, Any]:
     """Builds uncached risk summary context before TTL caching."""
     profile = _build_risk_profile_for_scope(
@@ -91,11 +90,15 @@ def _build_risk_panel_context_uncached(
     summary = profile.summary
     available_windows = tuple(int(window) for window in runtime.risk_config.rolling_vol_windows)
     resolved_vol_window = (
-        int(risk_vol_window_days)
-        if int(risk_vol_window_days) in available_windows
+        int(DEFAULT_RISK_VOL_WINDOW_DAYS)
+        if int(DEFAULT_RISK_VOL_WINDOW_DAYS) in available_windows
         else int(available_windows[0])
     )
-    resolved_sharpe_horizon = risk_sharpe_horizon if risk_sharpe_horizon in {"1d", "1w", "1m"} else DEFAULT_RISK_SHARPE_HORIZON
+    resolved_sharpe_horizon = (
+        DEFAULT_RISK_SHARPE_HORIZON
+        if DEFAULT_RISK_SHARPE_HORIZON in {"1d", "1w", "1m"}
+        else "1m"
+    )
     selected_vol_column = f"{resolved_vol_window}D"
     latest_vol = (
         float(profile.rolling_vol[selected_vol_column].dropna().iloc[-1])
@@ -138,19 +141,10 @@ def _build_risk_panel_context_uncached(
             f"Risk cards show latest {resolved_vol_window}D rolling volatility and "
             f"{resolved_sharpe_horizon.upper()}-horizon Sharpe for the selected scope ({profile.label})."
         ),
-        "risk_vol_window_options": tuple(
-            {"value": str(window), "label": f"{int(window)}D"} for window in available_windows
-        ),
-        "active_risk_vol_window_days": str(resolved_vol_window),
-        "risk_sharpe_horizon_options": (
-            {"value": "1d", "label": "1D"},
-            {"value": "1w", "label": "1W"},
-            {"value": "1m", "label": "1M"},
-        ),
-        "active_risk_sharpe_horizon": resolved_sharpe_horizon,
         "stress_rows": stress_rows,
         "scenario_notice": (
-            "Queue heavy scenario reruns from Operations. Simulation Analysis remains backlog-only."
+            "Warning: Approximation only; does not change trade logic. "
+            "Use Operations for full stress tests."
             if bundle.run_type == "portfolio"
             else ""
         ),
@@ -163,8 +157,6 @@ def build_risk_panel_context(
     *,
     risk_scope: str,
     stress: StressMultipliers,
-    risk_vol_window_days: int,
-    risk_sharpe_horizon: str,
 ) -> Dict[str, Any]:
     """Builds server-rendered context for the risk summary and stress tables."""
     return _cache_payload(
@@ -174,8 +166,8 @@ def build_risk_panel_context(
         parameters=_risk_cache_parameters(
             risk_scope,
             stress,
-            risk_vol_window_days=risk_vol_window_days,
-            risk_sharpe_horizon=risk_sharpe_horizon,
+            risk_vol_window_days=DEFAULT_RISK_VOL_WINDOW_DAYS,
+            risk_sharpe_horizon=DEFAULT_RISK_SHARPE_HORIZON,
         ),
         ttl_seconds=runtime.cache_service.policy.risk_ttl_seconds,
         compute_fn=lambda: _build_risk_panel_context_uncached(
@@ -183,8 +175,6 @@ def build_risk_panel_context(
             runtime,
             risk_scope=risk_scope,
             stress=stress,
-            risk_vol_window_days=risk_vol_window_days,
-            risk_sharpe_horizon=risk_sharpe_horizon,
         ),
     )
 
@@ -352,7 +342,7 @@ def _build_risk_stress_payload_uncached(
             }
         )
     return {
-        "title": f"{profile.label} Stress Preview",
+        "title": f"{profile.label} Stress Test Preview (Approximation)",
         "series": series,
     }
 

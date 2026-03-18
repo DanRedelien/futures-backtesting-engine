@@ -1,0 +1,46 @@
+<div class="exit-detail-view">
+    <div class="exit-detail-view__header">
+        <span>{{ exit_strategy_label }}</span>
+    </div>
+    <div class="terminal-split terminal-split--equal">
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h4>Total PnL by Exit Reason</h4>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="bar"
+                data-chart-endpoint="/api/charts/exit-reason?strategy={{ strategy_encoded }}"
+            ></div>
+        </section>
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h4>Exit Reason Breakdown</h4>
+            </div>
+            {% if breakdown_rows %}
+            <div class="terminal-table-wrap">
+                <table class="terminal-table">
+                    <thead>
+                        <tr>
+                            {% for column in breakdown_columns %}
+                            <th>{{ column }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in breakdown_rows %}
+                        <tr>
+                            {% for column in breakdown_columns %}
+                            <td>{{ row.get(column, "") }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="terminal-empty-state">No exit reason data available.</div>
+            {% endif %}
+        </section>
+    </div>
+</div>

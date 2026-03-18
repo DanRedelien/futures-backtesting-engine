@@ -20,6 +20,7 @@ import numpy as np
 from .execution import ExecutionHandler, Fill, Order, Trade
 from .analytics import PerformanceMetrics, save_backtest_results
 from .settings import BacktestSettings
+from .spread_model import compute_spread_ticks
 from src.data.data_lake import DataLake
 from src.data.bar_builder import BarBuilder
 from .fast_bar import FastBar
@@ -157,6 +158,43 @@ class BacktestEngine:
             self.strategy._position_side = None
         return orders
 
+    # ── Spread helpers ─────────────────────────────────────────────────────────
+
+    def _effective_spread_ticks(self, bar_index: int, closes: np.ndarray) -> Optional[int]:
+        """
+        Computes the deterministic spread tick count to apply at this bar.
+
+        Methodology:
+            For static mode, returns None so ExecutionHandler reads
+            settings.spread_ticks directly (avoids redundant work).
+            For adaptive_volatility mode, slices close history up to bar[bar_index - 1]
+            (strictly no-lookahead: only data available before execution at open[t])
+            and delegates to the shared spread model.
+
+        Args:
+            bar_index: Index of the current bar in the closes array.
+            closes: Full close price array from the loaded dataset.
+
+        Returns:
+            Integer tick count for adaptive mode, or None for static mode.
+        """
+        if self.settings.spread_mode != "adaptive_volatility":
+            return None
+
+        if bar_index <= 0:
+            return self.settings.spread_ticks
+
+        closes_series = pd.Series(closes[:bar_index])
+        return compute_spread_ticks(
+            mode=self.settings.spread_mode,
+            base_ticks=self.settings.spread_ticks,
+            closes=closes_series,
+            vol_step_pct=self.settings.spread_volatility_step_pct,
+            step_multiplier=self.settings.spread_step_multiplier,
+            vol_lookback=self.settings.spread_vol_lookback,
+            vol_baseline_lookback=self.settings.spread_vol_baseline_lookback,
+        )
+
     # ── Main event loop ────────────────────────────────────────────────────────
 
     def run(
@@ -265,6 +303,9 @@ class BacktestEngine:
             current_prices = {symbol: c_close}
 
             # A. Execute pending orders at open of this bar
+            # Compute spread ticks from history available at this bar (no-lookahead).
+            spread_ticks = self._effective_spread_ticks(i, closes)
+
             risk_orders = [o for o in pending_orders if "RISK" in o.reason]
             normal_orders = [
                 o for o in pending_orders if "RISK" not in o.reason
@@ -274,7 +315,9 @@ class BacktestEngine:
                 orders_to_execute += normal_orders
 
             for order in orders_to_execute:
-                fill = self.execution.execute_order(order, bar)
+                fill = self.execution.execute_order(
+                    order, bar, effective_spread_ticks=spread_ticks
+                )
                 if fill:
                     self.portfolio.update(fill, current_prices)
 
@@ -306,7 +349,10 @@ class BacktestEngine:
 
             if is_eod and pending_orders:
                 for order in pending_orders:
-                    fill = self.execution.execute_order(order, bar, execute_at_close=True)
+                    fill = self.execution.execute_order(
+                        order, bar, execute_at_close=True,
+                        effective_spread_ticks=spread_ticks,
+                    )
                     if fill:
                         self.portfolio.update(fill, current_prices)
                 pending_orders = []
@@ -316,7 +362,10 @@ class BacktestEngine:
             if is_eod and eod_close:
                 liq = self._liquidate_all(timestamp, reason="EOD_CLOSE")
                 for order in liq:
-                    fill = self.execution.execute_order(order, bar, execute_at_close=True)
+                    fill = self.execution.execute_order(
+                        order, bar, execute_at_close=True,
+                        effective_spread_ticks=spread_ticks,
+                    )
                     if fill:
                         self.portfolio.update(fill, current_prices)
 

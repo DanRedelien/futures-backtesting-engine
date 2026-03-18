@@ -14,6 +14,7 @@ from src.backtest_engine.analytics.dashboard.core.transforms import (
     compute_strategy_correlation,
 )
 from src.backtest_engine.analytics.dashboard.core.transforms.pnl import (
+    build_strategy_equity_curve,
     derive_daily_pnl_from_equity,
 )
 from src.backtest_engine.analytics.terminal_ui.constants import (
@@ -50,6 +51,7 @@ from src.backtest_engine.analytics.terminal_ui.constants import (
 from src.backtest_engine.analytics.terminal_ui.service import (
     _cache_payload,
     _points_from_series,
+    _resolve_slot_id_for_risk_scope,
 )
 from src.backtest_engine.analytics.terminal_ui.table_builders import (
     build_decomposition_table,
@@ -201,11 +203,48 @@ def build_rolling_sharpe_payload(
     )
 
 
+def _resolve_distribution_equity_for_scope(
+    bundle: ResultBundle,
+    risk_scope: str,
+) -> pd.Series:
+    """Resolves the equity curve used by PnL-distribution for one selected scope."""
+    portfolio_equity = bundle.history["total_value"]
+    if bundle.run_type != "portfolio":
+        return portfolio_equity
+
+    normalized_scope = (risk_scope or "portfolio").strip()
+    if normalized_scope in {"", "portfolio", "single"}:
+        return portfolio_equity
+
+    slot_id = _resolve_slot_id_for_risk_scope(bundle.slots or {}, normalized_scope)
+    if slot_id is None:
+        return portfolio_equity
+
+    slot_weights = bundle.slot_weights or {}
+    slot_weight_value = slot_weights.get(slot_id)
+    if slot_weight_value is None:
+        slot_weight_value = slot_weights.get(int(slot_id)) if str(slot_id).isdigit() else None
+    slot_weight = float(slot_weight_value) if slot_weight_value is not None else None
+
+    strategy_equity = build_strategy_equity_curve(
+        history=bundle.history,
+        slot_id=str(slot_id),
+        slot_weight=slot_weight,
+        slot_count=len(bundle.slots or {}),
+    )
+    if strategy_equity.empty:
+        return portfolio_equity
+    return strategy_equity
+
+
 def build_pnl_distribution_payload(
     bundle: ResultBundle,
+    *,
+    risk_scope: str = "portfolio",
 ) -> Dict[str, Any]:
     """Builds the ECharts histogram payload for daily PnL distribution."""
-    daily_pnl = derive_daily_pnl_from_equity(bundle.history["total_value"])
+    equity = _resolve_distribution_equity_for_scope(bundle, risk_scope=risk_scope)
+    daily_pnl = derive_daily_pnl_from_equity(equity)
     clean = daily_pnl.dropna().astype(float)
     if clean.empty:
         return {"title": TITLE_PNL_DISTRIBUTION, "bins": [], "markers": []}
@@ -236,16 +275,21 @@ def build_pnl_distribution_payload(
         center = float((edges[idx] + edges[idx + 1]) / 2.0)
         bins.append({"label": f"{center:.0f}", "value": int(count), "center": center})
 
+    summary = {
+        key: float(value) if pd.notna(value) and np.isfinite(float(value)) else None
+        for key, value in stats.items()
+    }
+
     return {
         "title": TITLE_PNL_DISTRIBUTION,
         "bins": bins,
         "markers": [
-            {"label": LABEL_VAR_95, "value": -float(stats["var_95"])},
-            {"label": LABEL_CVAR_95, "value": -float(stats["cvar_95"]) if not pd.isna(stats["cvar_95"]) else None},
-            {"label": LABEL_VAR_99, "value": -float(stats["var_99"])},
-            {"label": LABEL_MEAN, "value": float(stats["mean"]) if not pd.isna(stats["mean"]) else None},
+            {"label": LABEL_VAR_95, "value": -float(summary["var_95"]) if summary["var_95"] is not None else None},
+            {"label": LABEL_CVAR_95, "value": -float(summary["cvar_95"]) if summary["cvar_95"] is not None else None},
+            {"label": LABEL_VAR_99, "value": -float(summary["var_99"]) if summary["var_99"] is not None else None},
+            {"label": LABEL_MEAN, "value": float(summary["mean"]) if summary["mean"] is not None else None},
         ],
-        "summary": stats,
+        "summary": summary,
     }
 
 
@@ -423,3 +467,4 @@ def build_exposure_correlation_payload(
         ttl_seconds=runtime.cache_service.policy.correlation_ttl_seconds,
         compute_fn=_compute_payload,
     )
+

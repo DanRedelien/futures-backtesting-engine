@@ -4,28 +4,6 @@
             <h2>Risk</h2>
             <p>{{ profile_label }} profile rendered from canonical transforms only.</p>
         </div>
-        <div class="terminal-panel__controls">
-            <label class="terminal-field terminal-field--inline">
-                <span>Vol Window</span>
-                <select id="risk-vol-window-select">
-                    {% for option in risk_vol_window_options %}
-                    <option value="{{ option.value }}" {% if option.value == active_risk_vol_window_days %}selected{% endif %}>
-                        {{ option.label }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label class="terminal-field terminal-field--inline">
-                <span>Sharpe Horizon</span>
-                <select id="risk-sharpe-horizon-select">
-                    {% for option in risk_sharpe_horizon_options %}
-                    <option value="{{ option.value }}" {% if option.value == active_risk_sharpe_horizon %}selected{% endif %}>
-                        {{ option.label }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </label>
-        </div>
     </div>
 
     <div class="metric-grid metric-grid--compact">
@@ -46,7 +24,7 @@
             <div
                 class="terminal-chart terminal-chart--large"
                 data-chart-renderer="line"
-                data-chart-endpoint="/api/charts/risk-var?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+                data-chart-endpoint="/api/charts/risk-var?risk_scope={{ active_risk_scope|urlencode }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
             ></div>
         </section>
         <section class="terminal-chart-card">
@@ -56,7 +34,7 @@
             <div
                 class="terminal-chart terminal-chart--large"
                 data-chart-renderer="line"
-                data-chart-endpoint="/api/charts/risk-drawdown?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+                data-chart-endpoint="/api/charts/risk-drawdown?risk_scope={{ active_risk_scope|urlencode }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
             ></div>
         </section>
     </div>
@@ -69,17 +47,17 @@
             <div
                 class="terminal-chart terminal-chart--large"
                 data-chart-renderer="line"
-                data-chart-endpoint="/api/charts/risk-volatility?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+                data-chart-endpoint="/api/charts/risk-volatility?risk_scope={{ active_risk_scope|urlencode }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
             ></div>
         </section>
         <section class="terminal-chart-card">
             <div class="terminal-chart-card__header">
-                <h3>Stress Preview</h3>
+                <h3>Stress Test Preview (Approximation)</h3>
             </div>
             <div
                 class="terminal-chart terminal-chart--large"
                 data-chart-renderer="line"
-                data-chart-endpoint="/api/charts/risk-stress?risk_scope={{ active_risk_scope }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
+                data-chart-endpoint="/api/charts/risk-stress?risk_scope={{ active_risk_scope|urlencode }}&stress_volatility={{ stress_volatility }}&stress_slippage={{ stress_slippage }}&stress_commission={{ stress_commission }}"
             ></div>
         </section>
     </div>

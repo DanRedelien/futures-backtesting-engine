@@ -2,7 +2,11 @@
     <div class="terminal-panel__header">
         <div>
             <h2>Exit Analysis</h2>
-            <p>Summary table plus paginated trade detail-on-demand.</p>
+            {% if is_portfolio %}
+            <p>Select a strategy row to load the detail workspace.</p>
+            {% else %}
+            <p>Trade execution quality, PnL decay, and exit attribution.</p>
+            {% endif %}
         </div>
     </div>
 
@@ -10,44 +14,60 @@
         <div class="terminal-chart-card__header">
             <h3>Summary</h3>
         </div>
-        {% set columns = summary_columns %}
-        {% set rows = summary_rows %}
-        {% include "components/table.html" with context %}
+        <div class="terminal-table-wrap">
+            <table class="terminal-table">
+                <thead>
+                    <tr>
+                        {% for column in summary_columns %}
+                        <th>{{ column }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in summary_rows %}
+                    <tr
+                        class="terminal-table__row--clickable {% if row.get('Strategy') == exit_strategy %}is-selected{% endif %}"
+                        data-exit-strategy="{{ row.get('Strategy', '') }}"
+                    >
+                        {% for column in summary_columns %}
+                        <td>{{ row.get(column, "") }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </section>
 
     <section class="terminal-chart-card">
         <div class="terminal-chart-card__header">
-            <h3>Trade Detail</h3>
-            <span>{{ exit_strategy }}</span>
+            <h3>Detail Workspace</h3>
         </div>
-        {% set columns = detail_columns %}
-        {% set rows = detail_rows %}
-        {% include "components/table.html" with context %}
-
-        <div class="terminal-pagination">
+        <nav class="terminal-tabs terminal-tabs--secondary">
             <button
-                type="button"
-                class="terminal-button"
-                {% if not has_prev %}disabled{% endif %}
-                hx-get="/partials/bottom-panel?tab=exit-analysis&page={{ page - 1 }}"
-                hx-include="#dashboard-filters"
-                hx-target="#bottom-panel"
-                hx-swap="innerHTML"
-            >
-                Previous
-            </button>
-            <span>Page {{ page }} / {{ total_pages }}</span>
+                class="terminal-tab"
+                data-exit-detail-view="trade-log"
+            >Trade Log</button>
             <button
-                type="button"
-                class="terminal-button"
-                {% if not has_next %}disabled{% endif %}
-                hx-get="/partials/bottom-panel?tab=exit-analysis&page={{ page + 1 }}"
-                hx-include="#dashboard-filters"
-                hx-target="#bottom-panel"
-                hx-swap="innerHTML"
-            >
-                Next
-            </button>
-        </div>
+                class="terminal-tab"
+                data-exit-detail-view="execution-quality"
+            >Execution Quality</button>
+            <button
+                class="terminal-tab"
+                data-exit-detail-view="time-context"
+            >Time &amp; Context</button>
+            <button
+                class="terminal-tab"
+                data-exit-detail-view="exit-breakdown"
+            >Exit Breakdown</button>
+        </nav>
+        <div
+            id="exit-detail-workspace"
+            hx-get="/partials/exit-analysis/detail"
+            hx-include="#dashboard-filters"
+            hx-trigger="load, exit-detail-change from:body"
+            hx-target="#exit-detail-workspace"
+            hx-swap="innerHTML"
+        ></div>
     </section>
 </section>

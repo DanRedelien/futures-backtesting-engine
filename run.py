@@ -13,15 +13,13 @@ TODO: create 4-step testing line, like:
 4. Optimizer (optimize best strategy)
 5. python run.py --portfolio-backtest (take best and create uncorrletaed pnl strategys.)
 
-
 Execution modes:
     1. Single-Asset Backtest      (--backtest)
     2. Walk-Forward Optimization  (--wfo)
     3. Multi-Strategy Portfolio   (--portfolio-backtest)
     4. Dashboard only             (--dashboard)
 
-Strategies:
-    To see the full list of available strategies, run:
+    To see all available strategies:
         python run.py --help
 
 ── 1. Single-Asset Backtesting ──────────────────────────────────────────────
@@ -37,7 +35,7 @@ Strategies:
 ── 4. Open Dashboard (standalone, no new backtest) ──────────────────────────
     python run.py --dashboard
 
-To run a backtest AND open the dashboard immediately after:
+    To run a backtest and open the dashboard immediately after:
     python run.py --backtest --strategy zscore --dashboard
     python run.py --portfolio-backtest --dashboard
 

@@ -152,7 +152,8 @@ def save_backtest_results(
         "artifacts": saved_artifacts,
         "strategy_class": strategy.__class__.__name__ if strategy is not None else None,
         "vol_regime_config": vol_params,
-        "run_seed": _settings.random_seed,
+        "spread_mode": _settings.spread_mode,
+        "spread_ticks": _settings.spread_ticks,
         "settings_context": {
             "default_symbol": _settings.default_symbol,
             "results_dir": results_dir,

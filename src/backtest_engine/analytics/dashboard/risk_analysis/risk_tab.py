@@ -390,7 +390,7 @@ def _render_scenario_backtest_section(
         "Runs a real child portfolio backtest only on button press. "
         "Scenario artifacts are written under `results/scenarios/<scenario_id>/` and do not overwrite the baseline. "
         "Current rerun interpretation: volatility scales YAML `target_portfolio_vol`, "
-        "commission scales `commission_rate`, and slippage scales `max_slippage_ticks`."
+        "commission scales `commission_rate`, and slippage scales `spread_ticks`."
     )
 
     rerun_block_reason = ""

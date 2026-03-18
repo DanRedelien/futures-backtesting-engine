@@ -84,6 +84,20 @@ def _fmt_td(td: pd.Timedelta) -> str:
     return " ".join(parts)
 
 
+def _fmt_p_value(value: Any) -> str:
+    """Formats p-values with enough precision for significance interpretation."""
+    if pd.isna(value) or value is None:
+        return "NaN"
+    p_value = float(value)
+    if p_value < 0.0:
+        return "NaN"
+    if p_value < 0.0001:
+        return "<0.0001"
+    if p_value < 0.01:
+        return f"{p_value:.4f}"
+    return f"{p_value:.3f}"
+
+
 def get_full_report_str(
     metrics: Dict[str, float],
     trades: Optional[List[Any]],
@@ -196,12 +210,14 @@ def get_full_report_str(
     # 5. STATISTICAL SIGNIFICANCE
     lines.append("STATISTICAL SIGNIFICANCE")
     lines.append(sep)
-    stat_rows: List[Tuple] = [
-        ("T-Statistic",   metrics.get("T-Statistic", 0),   dict(decimals=2)),
-        ("P-Value",       metrics.get("P-Value", 1),       dict(decimals=3)),
+    stat_rows: List[Tuple[str, Any, Dict[str, Any]]] = [
+        ("T-Statistic", metrics.get("T-Statistic", 0), dict(decimals=2)),
     ]
     for label, val, args in stat_rows:
         lines.append(f"{label:<{LABEL_W}}{_fmt(val, **args):>{COL_W}}")
+    lines.append(
+        f"{'P-Value':<{LABEL_W}}{_fmt_p_value(metrics.get('P-Value', 1)):>{COL_W}}"
+    )
     lines.append("")
 
     # 6. EXECUTION STATS

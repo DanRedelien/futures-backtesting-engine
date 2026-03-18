@@ -37,13 +37,18 @@ def _signal(direction: int = 1, symbol: str = "ES", slot_id: int = 0) -> Strateg
     return StrategySignal(slot_id=slot_id, symbol=symbol, direction=direction)
 
 
-def _price_history(symbol: str = "ES", n: int = 30, vol: float = 0.015) -> dict:
+def _price_history(
+    symbol: str = "ES",
+    slot_id: int = 0,
+    n: int = 30,
+    vol: float = 0.015,
+) -> dict:
     """Generates a synthetic price series with known volatility."""
     np.random.seed(42)
     log_rets = np.random.normal(0, vol, n)
     prices = 4000.0 * np.exp(np.cumsum(log_rets))
     idx = pd.date_range("2023-01-02", periods=n, freq="30min")
-    return {symbol: pd.Series(prices, index=idx)}
+    return {(slot_id, symbol): pd.Series(prices, index=idx)}
 
 
 SPECS = {"ES": {"multiplier": 50.0, "tick_size": 0.25}}
@@ -85,7 +90,11 @@ class TestComputeTargets:
     def test_insufficient_history_gives_minimal_sizing(self):
         """When fewer bars than lookback exist, vol fallback (1.0) minimises size."""
         alloc = Allocator(_config(vol_lookback=20))
-        hist = {"ES": pd.Series([4000.0, 4001.0], index=pd.date_range("2023-01-02", periods=2, freq="30min"))}
+        hist = {
+            (0, "ES"): pd.Series(
+                [4000.0, 4001.0], index=pd.date_range("2023-01-02", periods=2, freq="30min")
+            )
+        }
         t = alloc.compute_targets([_signal(direction=1)], 100_000.0, {"ES": 4000.0}, SPECS, hist)
         # With 100% annualised vol fallback, sizing is tiny — cap at 0
         assert t[0].target_qty >= 0  # non-negative for long

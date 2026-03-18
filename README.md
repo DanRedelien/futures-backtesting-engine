@@ -2,6 +2,22 @@
 
 A futures-focused backtesting platform for single-strategy research, portfolio backtests, walk-forward validation, and terminal-style analytics review.
 
+## Quick Start
+
+```bash
+git clone <repo-url>
+cd <repo-folder>
+
+pip install -r requirements.txt   # install all dependencies
+
+pytest tests/                     # verify the installation (should be all green)
+
+python run.py --portfolio-backtest --dashboard   # run a backtest and open the dashboard
+# Dashboard → http://127.0.0.1:8000
+```
+
+> Python 3.11+ recommended. No manual `PYTHONPATH` export needed — `pyproject.toml` configures it automatically for pytest, and `run.py` is always launched from the repo root.
+
 ## Problem Statement
 
 Standard backtesting frameworks frequently suffer from data leakage during parameter optimization and hidden look-ahead bias when generating trading signals. This inevitably leads to in-sample (IS) curve fitting and catastrophic drawdowns in live trading.

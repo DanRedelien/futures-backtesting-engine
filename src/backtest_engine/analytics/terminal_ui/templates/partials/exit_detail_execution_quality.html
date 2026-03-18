@@ -1,0 +1,27 @@
+<div class="exit-detail-view">
+    <div class="exit-detail-view__header">
+        <span>{{ exit_strategy_label }}</span>
+    </div>
+    <div class="terminal-split terminal-split--equal">
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h4>MFE vs MAE</h4>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="scatter"
+                data-chart-endpoint="/api/charts/exit-mfe-mae?strategy={{ strategy_encoded }}"
+            ></div>
+        </section>
+        <section class="terminal-chart-card">
+            <div class="terminal-chart-card__header">
+                <h4>PnL Decay (Forward Horizon)</h4>
+            </div>
+            <div
+                class="terminal-chart terminal-chart--large"
+                data-chart-renderer="category_line"
+                data-chart-endpoint="/api/charts/exit-pnl-decay?strategy={{ strategy_encoded }}"
+            ></div>
+        </section>
+    </div>
+</div>

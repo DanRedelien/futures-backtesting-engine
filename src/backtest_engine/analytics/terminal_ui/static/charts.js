@@ -168,7 +168,107 @@
         }));
     }
 
+    function formatCompactAxisValue(value) {
+        if (!Number.isFinite(value)) {
+            return "";
+        }
+        const absoluteValue = Math.abs(value);
+        if (absoluteValue >= 1000000000) {
+            return (value / 1000000000).toFixed(absoluteValue >= 10000000000 ? 0 : 1).replace(/\.0$/, "") + "B";
+        }
+        if (absoluteValue >= 1000000) {
+            return (value / 1000000).toFixed(absoluteValue >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "M";
+        }
+        if (absoluteValue >= 1000) {
+            return (value / 1000).toFixed(absoluteValue >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k";
+        }
+        if (Number.isInteger(value)) {
+            return String(value);
+        }
+        return value.toFixed(Math.abs(value) >= 10 ? 0 : 1).replace(/\.0$/, "");
+    }
+
+    function formatFullAxisValue(value) {
+        if (!Number.isFinite(value)) {
+            return "n/a";
+        }
+        const absoluteValue = Math.abs(value);
+        const fractionDigits = absoluteValue >= 1000 ? 0 : absoluteValue >= 10 ? 1 : 2;
+        return new Intl.NumberFormat("en-US", {
+            maximumFractionDigits: fractionDigits,
+        }).format(value);
+    }
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function computeNiceStep(rawStep) {
+        if (!Number.isFinite(rawStep) || rawStep <= 0) {
+            return 1;
+        }
+        const exponent = Math.floor(Math.log10(rawStep));
+        const magnitude = Math.pow(10, exponent);
+        const normalized = rawStep / magnitude;
+        if (normalized <= 1) {
+            return 1 * magnitude;
+        }
+        if (normalized <= 2) {
+            return 2 * magnitude;
+        }
+        if (normalized <= 2.5) {
+            return 2.5 * magnitude;
+        }
+        if (normalized <= 5) {
+            return 5 * magnitude;
+        }
+        return 10 * magnitude;
+    }
+
+    function computeNiceAxisBounds(values, paddingRatio, targetTickCount) {
+        const finiteValues = (values || []).filter((value) => Number.isFinite(value));
+        if (finiteValues.length === 0) {
+            return {
+                min: null,
+                max: null,
+                interval: null,
+                splitNumber: targetTickCount,
+            };
+        }
+        const rawMin = Math.min(...finiteValues);
+        const rawMax = Math.max(...finiteValues);
+        const rawSpan = Math.abs(rawMax - rawMin);
+        const referenceSpan = rawSpan > 0 ? rawSpan : Math.max(Math.abs(rawMax), Math.abs(rawMin), 1);
+        const paddedMin = rawMin - referenceSpan * paddingRatio;
+        const paddedMax = rawMax + referenceSpan * paddingRatio;
+        const paddedSpan = Math.max(Math.abs(paddedMax - paddedMin), 1e-9);
+        const resolvedTickCount = clamp(targetTickCount, 4, 6);
+        const interval = computeNiceStep(paddedSpan / resolvedTickCount);
+        const niceMin = Math.floor(paddedMin / interval) * interval;
+        const niceMax = Math.ceil(paddedMax / interval) * interval;
+        return {
+            min: niceMin,
+            max: niceMax,
+            interval: interval,
+            splitNumber: Math.max(1, Math.round((niceMax - niceMin) / interval)),
+        };
+    }
+
+    function collectLineValues(series, thresholds) {
+        const seriesValues = (series || [])
+            .flatMap((item) => (item && Array.isArray(item.data) ? item.data : []))
+            .map((point) => (Array.isArray(point) ? Number(point[1]) : Number.NaN))
+            .filter((value) => Number.isFinite(value));
+        const thresholdValues = (thresholds || [])
+            .map((threshold) => Number(threshold && threshold.value))
+            .filter((value) => Number.isFinite(value));
+        return seriesValues.concat(thresholdValues);
+    }
+
     function attachResize(element, instance, lightweight) {
+        const MAX_DEFERRED_MEASURE_ATTEMPTS = 12;
+        let deferredMeasureAttempts = 0;
+
         function measuredSize() {
             const width = element.clientWidth;
             const height = element.clientHeight;
@@ -178,8 +278,13 @@
         function applySize() {
             const size = measuredSize();
             if (size.width < 16 || size.height < 16) {
+                if (deferredMeasureAttempts < MAX_DEFERRED_MEASURE_ATTEMPTS) {
+                    deferredMeasureAttempts += 1;
+                    window.requestAnimationFrame(applySize);
+                }
                 return;
             }
+            deferredMeasureAttempts = 0;
             if (lightweight) {
                 instance.applyOptions({ width: size.width, height: size.height });
             } else {
@@ -200,34 +305,60 @@
             return;
         }
         resetEchartInstance(element);
+        const containerWidth = Math.max(320, element.clientWidth || 320);
+        const axisFontSize = containerWidth <= 720 ? 10 : 11;
+        const plotHeight = Math.max(120, (element.clientHeight || 0) - 88);
+        const targetTickCount = clamp(Math.floor(plotHeight / 44), 4, 6);
+        const yAxisPaddingRatio = Number.isFinite(Number(payload.yAxisPaddingRatio))
+            ? Number(payload.yAxisPaddingRatio)
+            : 0.06;
         const chart = echarts.init(element);
         const markLineData = (payload.thresholds || []).map((threshold) => ({
             yAxis: threshold.value,
             label: { formatter: threshold.label || "" },
         }));
+        const builtSeries = buildEchartsSeries(payload.series);
+        const axisBounds = computeNiceAxisBounds(
+            collectLineValues(builtSeries, payload.thresholds),
+            yAxisPaddingRatio,
+            targetTickCount,
+        );
         chart.setOption({
             backgroundColor: "#0D0D0D",
             animation: false,
             textStyle: { color: "#FFFFFF", fontFamily: "JetBrains Mono" },
-            tooltip: { trigger: "axis" },
+            tooltip: {
+                trigger: "axis",
+                valueFormatter: (value) => formatFullAxisValue(Number(value)),
+            },
             legend: {
                 top: 0,
                 textStyle: { color: "#FFFFFF" },
             },
-            grid: { left: 48, right: 20, top: 40, bottom: 28 },
+            grid: { left: 12, right: 12, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "time",
                 axisLine: { lineStyle: { color: "#222222" } },
-                axisLabel: { color: "#8A8A8A" },
+                axisLabel: { color: "#8A8A8A", fontSize: axisFontSize },
                 splitLine: { lineStyle: { color: "#111111" } },
             },
             yAxis: {
                 type: "value",
+                scale: true,
+                min: axisBounds.min,
+                max: axisBounds.max,
+                interval: axisBounds.interval,
+                splitNumber: axisBounds.splitNumber,
                 axisLine: { lineStyle: { color: "#222222" } },
-                axisLabel: { color: "#8A8A8A" },
+                axisLabel: {
+                    color: "#8A8A8A",
+                    fontSize: axisFontSize,
+                    hideOverlap: true,
+                    formatter: (value) => formatCompactAxisValue(Number(value)),
+                },
                 splitLine: { lineStyle: { color: "#111111" } },
             },
-            series: buildEchartsSeries(payload.series).map((item) => ({
+            series: builtSeries.map((item) => ({
                 ...item,
                 markLine: markLineData.length > 0 ? { symbol: "none", lineStyle: { color: "#444444" }, data: markLineData } : undefined,
             })),
@@ -390,8 +521,15 @@
                 name: item.name,
                 type: "bar",
                 yAxisIndex: item.yAxisIndex || 0,
-                data: item.values,
-                itemStyle: { color: ["#22C55E", "#3B82F6", "#EAB308"][index % 3] },
+                data: item.itemColors
+                    ? (item.values || []).map((v, i) => ({
+                          value: v,
+                          itemStyle: { color: (item.itemColors || [])[i] || "#8A8A8A" },
+                      }))
+                    : item.values,
+                itemStyle: item.itemColors
+                    ? undefined
+                    : { color: ["#22C55E", "#3B82F6", "#EAB308"][index % 3] },
             })),
         });
         attachResize(element, chart);
@@ -605,6 +743,270 @@
         }
     }
 
+    function renderScatterChart(element, payload) {
+        const series = (payload.series || []).filter(
+            (item) => item.points && item.points.length > 0,
+        );
+        if (series.length === 0) {
+            const reason = payload.emptyReason ? " " + payload.emptyReason : "";
+            element.innerHTML =
+                '<div class="terminal-empty-state">No scatter data available.' + reason + "</div>";
+            return;
+        }
+        resetEchartInstance(element);
+        const chart = echarts.init(element);
+        chart.setOption({
+            backgroundColor: "#0D0D0D",
+            animation: false,
+            textStyle: { color: "#FFFFFF", fontFamily: "JetBrains Mono" },
+            legend: { top: 0, textStyle: { color: "#FFFFFF" } },
+            tooltip: {
+                trigger: "item",
+                formatter: (params) => {
+                    const xVal = params.data[0];
+                    const yVal = params.data[1];
+                    return (
+                        params.seriesName +
+                        "<br>MAE: $" +
+                        formatFullAxisValue(xVal) +
+                        "<br>MFE: $" +
+                        formatFullAxisValue(yVal)
+                    );
+                },
+            },
+            grid: { left: 12, right: 12, top: 40, bottom: 36, containLabel: true },
+            xAxis: {
+                type: "value",
+                name: payload.xAxisLabel || "",
+                nameLocation: "middle",
+                nameGap: 26,
+                inverse: payload.xAxisReversed === true,
+                axisLabel: {
+                    color: "#8A8A8A",
+                    formatter: (value) => formatCompactAxisValue(Number(value)),
+                },
+                axisLine: { lineStyle: { color: "#222222" } },
+                splitLine: { lineStyle: { color: "#111111" } },
+            },
+            yAxis: {
+                type: "value",
+                name: payload.yAxisLabel || "",
+                nameLocation: "middle",
+                nameGap: 44,
+                axisLabel: {
+                    color: "#8A8A8A",
+                    formatter: (value) => formatCompactAxisValue(Number(value)),
+                },
+                axisLine: { lineStyle: { color: "#222222" } },
+                splitLine: { lineStyle: { color: "#111111" } },
+            },
+            series: [
+                ...series.map((item) => ({
+                    name: item.name,
+                    type: "scatter",
+                    symbolSize: 6,
+                    itemStyle: { color: item.color || "#8A8A8A", opacity: 0.7 },
+                    data: (item.points || []).map((p) => [p.x, p.y]),
+                })),
+                // Break-even boundary: y = -x (MFE equals adverse excursion).
+                // Rendered as a separate line series so ECharts includes it in
+                // axis scaling without requiring a secondary coordinate system.
+                ...(payload.diagonal
+                    ? [
+                          {
+                              name: "Break-even",
+                              type: "line",
+                              showSymbol: false,
+                              data: [
+                                  [payload.diagonal.x1, payload.diagonal.y1],
+                                  [payload.diagonal.x2, payload.diagonal.y2],
+                              ],
+                              lineStyle: { type: "dashed", color: "#6B7280", width: 1 },
+                              itemStyle: { color: "#6B7280" },
+                          },
+                      ]
+                    : []),
+            ],
+        });
+        attachResize(element, chart);
+    }
+
+    function renderCategoryLineChart(element, payload) {
+        if (!payload.categories || payload.categories.length === 0) {
+            const reason = payload.emptyReason ? " " + payload.emptyReason : "";
+            element.innerHTML =
+                '<div class="terminal-empty-state">No data available.' + reason + "</div>";
+            return;
+        }
+        resetEchartInstance(element);
+        const chart = echarts.init(element);
+        const containerWidth = Math.max(320, element.clientWidth || 320);
+        const axisFontSize = containerWidth <= 720 ? 10 : 11;
+        const plotHeight = Math.max(120, (element.clientHeight || 0) - 88);
+        const targetTickCount = clamp(Math.floor(plotHeight / 44), 4, 6);
+        const markLineData = (payload.thresholds || [])
+            .filter((t) => t && Number.isFinite(Number(t.value)))
+            .map((t) => ({
+                yAxis: Number(t.value),
+                lineStyle: { type: "dashed", color: t.color || "#8A8A8A", width: 1.5 },
+                label: { formatter: t.label || "", color: t.color || "#8A8A8A", fontSize: 10 },
+            }));
+        const verticalMarkLineData = (payload.verticalMarkers || [])
+            .filter((marker) => marker && marker.category)
+            .map((marker) => ({
+                xAxis: marker.category,
+                lineStyle: { type: "dashed", color: marker.color || "#F59E0B", width: 1.5 },
+                label: {
+                    formatter: marker.label || "Time Stop Hold",
+                    color: marker.color || "#F59E0B",
+                    fontSize: 10,
+                },
+            }));
+        const yValues = [];
+        (payload.series || []).forEach((item) => {
+            (item.values || []).forEach((value) => {
+                const parsed = Number(value);
+                if (Number.isFinite(parsed)) {
+                    yValues.push(parsed);
+                }
+            });
+        });
+        (payload.thresholds || []).forEach((threshold) => {
+            const parsed = Number(threshold && threshold.value);
+            if (Number.isFinite(parsed)) {
+                yValues.push(parsed);
+            }
+        });
+        const axisBounds = computeNiceAxisBounds(yValues, 0.06, targetTickCount);
+        const mainSeries = (payload.series || []).map((item, index) => ({
+            name: item.name,
+            type: "line",
+            data: item.values,
+            symbol: "circle",
+            symbolSize: 7,
+            lineStyle: { color: item.color || "#FFFFFF", width: 2 },
+            itemStyle: { color: item.color || "#FFFFFF" },
+            markLine: undefined,
+        }));
+        const helperLegendSeries = [];
+        (payload.thresholds || []).forEach((t, index) => {
+            if (!t || !markLineData[index]) {
+                return;
+            }
+            helperLegendSeries.push({
+                name: t.legend || t.label || "Threshold",
+                type: "line",
+                data: (payload.categories || []).map(() => null),
+                symbol: "none",
+                lineStyle: { type: "dashed", color: t.color || "#8A8A8A", width: 1.5 },
+                itemStyle: { color: t.color || "#8A8A8A" },
+                tooltip: { show: false },
+                markLine: { symbol: "none", data: [markLineData[index]] },
+            });
+        });
+        (payload.verticalMarkers || []).forEach((marker, index) => {
+            if (!marker || !verticalMarkLineData[index]) {
+                return;
+            }
+            helperLegendSeries.push({
+                name: marker.legend || marker.label || "Vertical Marker",
+                type: "line",
+                data: (payload.categories || []).map(() => null),
+                symbol: "none",
+                lineStyle: { type: "dashed", color: marker.color || "#F59E0B", width: 1.5 },
+                itemStyle: { color: marker.color || "#F59E0B" },
+                tooltip: { show: false },
+                markLine: { symbol: "none", data: [verticalMarkLineData[index]] },
+            });
+        });
+
+        const mainSeriesByLegendName = new Map();
+        (payload.series || []).forEach((item) => {
+            mainSeriesByLegendName.set(item.name, item);
+        });
+        const thresholdByLegendName = new Map();
+        (payload.thresholds || []).forEach((threshold) => {
+            if (!threshold) {
+                return;
+            }
+            const legendName = threshold.legend || threshold.label || "Threshold";
+            thresholdByLegendName.set(legendName, threshold);
+        });
+
+        function updateCategoryLineAxisFromLegend(selected) {
+            const activeValues = [];
+
+            mainSeriesByLegendName.forEach((seriesItem, legendName) => {
+                if (!selected || selected[legendName] !== false) {
+                    (seriesItem.values || []).forEach((value) => {
+                        const parsed = Number(value);
+                        if (Number.isFinite(parsed)) {
+                            activeValues.push(parsed);
+                        }
+                    });
+                }
+            });
+
+            thresholdByLegendName.forEach((threshold, legendName) => {
+                if (!selected || selected[legendName] !== false) {
+                    const parsed = Number(threshold && threshold.value);
+                    if (Number.isFinite(parsed)) {
+                        activeValues.push(parsed);
+                    }
+                }
+            });
+
+            const bounds = computeNiceAxisBounds(activeValues, 0.06, targetTickCount);
+            chart.setOption({
+                yAxis: {
+                    min: bounds.min,
+                    max: bounds.max,
+                    interval: bounds.interval,
+                    splitNumber: bounds.splitNumber,
+                },
+            });
+        }
+
+        chart.setOption({
+            backgroundColor: "#0D0D0D",
+            animation: false,
+            textStyle: { color: "#FFFFFF", fontFamily: "JetBrains Mono" },
+            tooltip: {
+                trigger: "axis",
+                valueFormatter: (value) => "$" + formatFullAxisValue(Number(value)),
+            },
+            legend: { top: 0, textStyle: { color: "#FFFFFF" } },
+            grid: { left: 12, right: 12, top: 40, bottom: 28, containLabel: true },
+            xAxis: {
+                type: "category",
+                data: payload.categories,
+                axisLabel: { color: "#8A8A8A", fontSize: axisFontSize },
+                axisLine: { lineStyle: { color: "#222222" } },
+            },
+            yAxis: {
+                type: "value",
+                scale: true,
+                min: axisBounds.min,
+                max: axisBounds.max,
+                interval: axisBounds.interval,
+                splitNumber: axisBounds.splitNumber,
+                axisLabel: {
+                    color: "#8A8A8A",
+                    fontSize: axisFontSize,
+                    hideOverlap: true,
+                    formatter: (value) => formatCompactAxisValue(Number(value)),
+                },
+                axisLine: { lineStyle: { color: "#222222" } },
+                splitLine: { lineStyle: { color: "#111111" } },
+            },
+            series: mainSeries.concat(helperLegendSeries),
+        });
+        chart.on("legendselectchanged", (event) => {
+            updateCategoryLineAxisFromLegend(event.selected || {});
+        });
+        attachResize(element, chart);
+    }
+
     function renderChart(element) {
         const endpoint = element.dataset.chartEndpoint;
         const renderer = element.dataset.chartRenderer;
@@ -643,6 +1045,14 @@
                 }
                 if (renderer === "distribution") {
                     renderDistributionChart(element, payload);
+                    return;
+                }
+                if (renderer === "scatter") {
+                    renderScatterChart(element, payload);
+                    return;
+                }
+                if (renderer === "category_line") {
+                    renderCategoryLineChart(element, payload);
                     return;
                 }
                 renderLineChart(element, payload);

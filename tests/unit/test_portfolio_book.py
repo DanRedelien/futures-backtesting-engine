@@ -53,14 +53,14 @@ class TestMarkToMarket:
     def test_invariant_cash_plus_holdings_equals_equity(self):
         b = _book()
         b.apply_fill(0, "ES", 4000.0, 1, 2.5, 50.0, None)
-        b.mark_to_market({"ES": 4050.0}, SPECS)
+        b.mark_to_market({(0, "ES"): 4050.0}, SPECS)
         assert b.total_equity == pytest.approx(b.cash + b.holdings_value)
 
     def test_gap_bar_uses_last_known_price(self):
         """MtM on a bar with no price update must NOT zero-value the position."""
         b = _book(1_000_000.0)
         b.apply_fill(0, "ES", 4000.0, 1, 0.0, 50.0, None)
-        b.mark_to_market({"ES": 4100.0}, SPECS)  # first bar, price known
+        b.mark_to_market({(0, "ES"): 4100.0}, SPECS)  # first bar, price known
         equity_before = b.total_equity
         b.mark_to_market({}, SPECS)               # gap bar — ES price missing
         assert b.total_equity == pytest.approx(equity_before)  # must hold, not 0
@@ -69,6 +69,6 @@ class TestMarkToMarket:
         b = _book()
         b.apply_fill(0, "ES", 4000.0, 1, 0.0, 50.0, None)
         b.apply_fill(1, "NQ", 15000.0, 1, 0.0, 20.0, None)
-        b.mark_to_market({"ES": 4050.0, "NQ": 15100.0},
+        b.mark_to_market({(0, "ES"): 4050.0, (1, "NQ"): 15100.0},
                          {"ES": {"multiplier": 50.0}, "NQ": {"multiplier": 20.0}})
         assert b.total_equity == pytest.approx(b.cash + b.holdings_value)

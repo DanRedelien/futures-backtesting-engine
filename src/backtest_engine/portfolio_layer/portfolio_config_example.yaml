@@ -20,7 +20,7 @@
 #       )
 #   Result is capped at max_contracts_per_slot per (slot, symbol).
 #
-# Shared settings (commission_rate, max_slippage_ticks, kill-switch thresholds,
+# Shared settings (commission_rate, spread_ticks, spread_mode, kill-switch thresholds,
 # eod_close_time, trading hours) live in settings.py — no duplication here.
 
 portfolio:
@@ -37,7 +37,7 @@ strategies:
   - strategy: stat_level
     symbols:
       - GC
-    weight: 0.15
+    weight: 0.10
     timeframe: 30m
     params: {}
 
@@ -51,14 +51,14 @@ strategies:
   - strategy: sma_pullback
     symbols:
       - NQ
-    weight: 0.15
+    weight: 0.30
     timeframe: 30m
     params: {}
 
   - strategy: zscore
     symbols:
       - CL
-    weight: 0.15
+    weight: 0.10
     timeframe: 30m
     params: {}
 
@@ -72,7 +72,7 @@ strategies:
   - strategy: mean_rev
     symbols:
       - GC
-    weight: 0.15
+    weight: 0.10
     timeframe: 30m
     params: {}
 

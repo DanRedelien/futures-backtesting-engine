@@ -27,7 +27,7 @@ targeted contract sizing.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -69,7 +69,7 @@ class Allocator:
         total_equity: float,
         current_prices: Dict[str, float],
         instrument_specs: Dict[str, Dict],
-        price_history: Dict[str, pd.Series],
+        price_history: Dict[Tuple[int, str], pd.Series],
         bars_per_year: int = _BARS_PER_YEAR_FALLBACK,
     ) -> List[TargetPosition]:
         """
@@ -86,7 +86,7 @@ class Allocator:
             total_equity: Current portfolio equity (cash + MtM).
             current_prices: Symbol -> latest close price.
             instrument_specs: Symbol -> {multiplier, tick_size}.
-            price_history: Symbol -> pd.Series of recent close prices
+            price_history: (slot_id, symbol) -> pd.Series of recent close prices
                            (at least vol_lookback_bars entries).
 
         Returns:
@@ -107,7 +107,7 @@ class Allocator:
             multiplier = float(spec.get("multiplier", 1.0))
 
             if price > 0 and multiplier > 0 and sig.direction != 0:
-                vol  = self._estimate_vol(sig.symbol, price_history, bars_per_year)
+                vol = self._estimate_vol(sig.slot_id, sig.symbol, price_history, bars_per_year)
                 contracts = self._size_contracts(equity_per_ticker, price, multiplier, vol)
             else:
                 contracts = 0
@@ -125,8 +125,9 @@ class Allocator:
 
     def _estimate_vol(
         self,
+        slot_id: int,
         symbol: str,
-        price_history: Dict[str, pd.Series],
+        price_history: Dict[Tuple[int, str], pd.Series],
         bars_per_year: int = _BARS_PER_YEAR_FALLBACK,
     ) -> float:
         """
@@ -139,14 +140,15 @@ class Allocator:
             (100 % vol, resulting in very small sizing) when data is insufficient.
 
         Args:
+            slot_id: Strategy slot index for series isolation.
             symbol: Instrument ticker.
-            price_history: Symbol -> pd.Series of close prices.
+            price_history: (slot_id, symbol) -> pd.Series of close prices.
             bars_per_year: Annualisation factor from the engine (actual data frequency).
 
         Returns:
             Annualised volatility estimate (e.g. 0.15 = 15 %).
         """
-        series = price_history.get(symbol)
+        series = price_history.get((slot_id, symbol))
         lookback = self._config.vol_lookback_bars
 
         if series is None or len(series) < lookback + 1:

@@ -69,7 +69,7 @@ def test_no_leakage_execution_timing():
     
     settings = BacktestSettings(
         commission_rate=0.0,
-        max_slippage_ticks=0,   # Set slippage to 0 for exact math
+        spread_ticks=0,   # Zero spread for exact price math
         initial_capital=10000.0
     )
     # Add dummy spec to ensure multiplier=1 for easy math
@@ -97,7 +97,7 @@ def test_accounting_invariants():
     """
     data = create_mock_data()
     
-    settings = BacktestSettings(commission_rate=0.0, max_slippage_ticks=0, initial_capital=10000.0)
+    settings = BacktestSettings(commission_rate=0.0, spread_ticks=0, initial_capital=10000.0)
     settings.instrument_specs = {"NQ": {"tick_size": 1.0, "multiplier": 1.0}}
     
     engine = BacktestEngine(settings=settings, data=data)
@@ -133,10 +133,10 @@ def test_circuit_breaker_max_drawdown():
     # Should halt when DD exceeds 20%.
     
     settings = BacktestSettings(
-        commission_rate=0.0, 
-        max_slippage_ticks=0, 
+        commission_rate=0.0,
+        spread_ticks=0,
         initial_capital=1000.0,
-        max_drawdown_pct=0.20 # 20% max DD
+        max_drawdown_pct=0.20,  # 20% max DD
     )
     settings.default_symbol = "NQ"
     settings.instrument_specs = {"NQ": {"tick_size": 1.0, "multiplier": 10.0}}

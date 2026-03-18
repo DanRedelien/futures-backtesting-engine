@@ -2,8 +2,8 @@ from __future__ import annotations
 
 DEFAULT_BOTTOM_TAB = "pnl-distribution"
 DEFAULT_CORRELATION_HORIZON = "1d"
-DEFAULT_RISK_SHARPE_HORIZON = "1d"
-RISK_SHARPE_HORIZON_OPTIONS: tuple[str, ...] = ("1d", "1w", "1m")
+DEFAULT_RISK_VOL_WINDOW_DAYS = 20
+DEFAULT_RISK_SHARPE_HORIZON = "1m"
 
 BASE_BOTTOM_TABS: tuple[dict[str, str], ...] = (
     {"id": "pnl-distribution", "label": "PnL Distribution"},
@@ -52,3 +52,13 @@ PNL_DIST_FD_WIDTH_FACTOR = 2.0
 DECOMPOSITION_SORT_COLUMN = "PnL Contrib (%)"
 DECOMPOSITION_RISK_COLUMN = "Risk Contrib (%)"
 DECOMPOSITION_PNL_CONTRIB_COLUMN = "PnL Contrib (%)"
+
+# Exit analysis chart titles.
+TITLE_EXIT_MFE_MAE = "MFE vs MAE"
+TITLE_EXIT_PNL_DECAY = "PnL Decay (Forward Horizon)"
+TITLE_EXIT_HOLDING_TIME = "Avg PnL by Holding Time"
+TITLE_EXIT_VOL_REGIME = "Avg PnL by Entry Volatility"
+TITLE_EXIT_REASON = "Total PnL by Exit Reason"
+
+# Default sub-view for the exit-analysis detail workspace.
+DEFAULT_EXIT_DETAIL_VIEW = "trade-log"

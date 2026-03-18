@@ -21,6 +21,7 @@ from src.backtest_engine.analytics.terminal_ui.constants import (
 from src.backtest_engine.analytics.terminal_ui.service import (
     _build_risk_profile_for_scope,
     _format_currency,
+    _format_p_value,
     _format_pct,
     _format_ratio,
     TerminalShellContext,
@@ -177,7 +178,7 @@ def build_top_ribbon_metrics(
         # Row 3 — statistical significance and execution stats
         # Keep this pair adjacent for significance interpretation.
         _metric("T-Stat", _format_ratio(float(metrics.get("T-Statistic", nan)))),
-        _metric("P-Value", _format_ratio(float(metrics.get("P-Value", nan)))),
+        _metric("P-Value", _format_p_value(float(metrics.get("P-Value", nan)))),
         _metric("Max Hold", _format_hold_time(max_hold)),
         _metric("Avg Hold", _format_hold_time(avg_hold)),
         _metric("Min Hold", _format_hold_time(min_hold)),
@@ -268,11 +269,20 @@ def build_exit_detail_table(
         if column_name in trades.columns
     ]
     projected = trades[columns].copy() if columns else trades.copy()
+    trade_log_numeric_columns = ("pnl", "mfe", "mae", "pnl_decay_60m")
+    for column_name in trade_log_numeric_columns:
+        if column_name not in projected.columns:
+            continue
+        numeric = pd.to_numeric(projected[column_name], errors="coerce")
+        projected[column_name] = numeric.map(
+            lambda value: f"{float(value):.2f}" if pd.notna(value) else "N/A"
+        )
     total_rows = len(projected)
     if total_rows == 0:
         return projected, 0
 
-    safe_page = max(1, page)
+    total_pages = max(1, (total_rows + page_size - 1) // page_size)
+    safe_page = max(1, min(page, total_pages))
     start = (safe_page - 1) * page_size
     end = start + page_size
     return projected.iloc[start:end].reset_index(drop=True), total_rows

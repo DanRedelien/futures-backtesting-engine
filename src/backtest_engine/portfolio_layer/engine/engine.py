@@ -22,6 +22,7 @@ import pandas as pd
 
 from src.backtest_engine.settings import BacktestSettings
 from src.backtest_engine.execution import Order
+from src.backtest_engine.spread_model import compute_spread_ticks
 from src.data.data_lake import DataLake
 
 from ..domain.contracts import PortfolioConfig
@@ -182,9 +183,10 @@ class PortfolioBacktestEngine:
         slot_id: int,
         symbol: str,
         qty: float,
-        bar: pd.Series,
+        bar: "pd.Series",
         execute_at_close: bool = False,
         reason: str = "RISK_LIQ",
+        effective_spread_ticks: Optional[int] = None,
     ) -> None:
         """
         Liquidates a single (slot, symbol) position at the given bar.
@@ -196,10 +198,15 @@ class PortfolioBacktestEngine:
             bar: Current bar pd.Series (for fill simulation).
             execute_at_close: Fill at close price if True, else open.
             reason: Tag written to the order.
+            effective_spread_ticks: Pre-computed tick count from the spread model.
         """
         side = "SELL" if qty > 0 else "BUY"
-        self._execute_order(slot_id, symbol, side, abs(qty), bar,
-                            execute_at_close=execute_at_close, reason=reason)
+        self._execute_order(
+            slot_id, symbol, side, abs(qty), bar,
+            execute_at_close=execute_at_close,
+            reason=reason,
+            effective_spread_ticks=effective_spread_ticks,
+        )
 
     # ── Data loading ───────────────────────────────────────────────────────────
 
@@ -238,6 +245,59 @@ class PortfolioBacktestEngine:
             self._bars_per_year = max(1, round(len(first_df) / span_years))
         print(f"[Portfolio] bars_per_year estimate: {self._bars_per_year:,}")
 
+    # ── Spread helpers ─────────────────────────────────────────────────────────
+
+    def _effective_spread_ticks(
+        self,
+        slot_id: int,
+        symbol: str,
+        price_history: Dict[Tuple[int, str], "pd.Series"],
+        up_to_ts: Any,
+    ) -> Optional[int]:
+        """
+        Computes the deterministic spread tick count for a symbol at the current bar.
+
+        Methodology:
+            For static mode, returns None so ExecutionHandler reads
+            settings.spread_ticks directly.
+            For adaptive_volatility mode, slices close history strictly before
+            up_to_ts (no-lookahead: execution happens at open[ts], so close[ts]
+            is not yet observable).  Mirrors the single engine which uses
+            closes[:bar_index] to exclude the current bar.
+
+        Args:
+            slot_id: Slot index for strategy-local market data context.
+            symbol: Instrument ticker.
+            price_history: Mapping of (slot_id, symbol) to full close-price Series.
+            up_to_ts: Current bar timestamp.  Close at this timestamp is excluded.
+
+        Returns:
+            Integer tick count for adaptive mode, or None for static mode.
+        """
+        if self.settings.spread_mode != "adaptive_volatility":
+            return None
+
+        series = price_history.get((slot_id, symbol))
+        if series is None:
+            return self.settings.spread_ticks
+
+        # Exclude the close at up_to_ts: that bar's close is not yet available
+        # when the order fills at open[ts].  This mirrors closes[:bar_index] in
+        # the single engine which is a Python slice (exclusive upper bound).
+        closes = series.loc[:up_to_ts]
+        if up_to_ts in series.index:
+            closes = closes.iloc[:-1]
+
+        return compute_spread_ticks(
+            mode=self.settings.spread_mode,
+            base_ticks=self.settings.spread_ticks,
+            closes=closes,
+            vol_step_pct=self.settings.spread_volatility_step_pct,
+            step_multiplier=self.settings.spread_step_multiplier,
+            vol_lookback=self.settings.spread_vol_lookback,
+            vol_baseline_lookback=self.settings.spread_vol_baseline_lookback,
+        )
+
     # ── Execution simulation ───────────────────────────────────────────────────
 
     def _execute_order(
@@ -246,9 +306,10 @@ class PortfolioBacktestEngine:
         symbol: str,
         side: str,
         quantity: float,
-        bar: pd.Series,
+        bar: "pd.Series",
         execute_at_close: bool = False,
         reason: str = "PORTFOLIO_SYNC",
+        effective_spread_ticks: Optional[int] = None,
     ) -> None:
         """
         Simulates a fill via ExecutionHandler and applies it to PortfolioBook.
@@ -256,6 +317,17 @@ class PortfolioBacktestEngine:
         Delegates to the slot's ExecutionHandler to generate a proper Trade
         object (same FIFO matching as the single-asset engine), then writes
         the fill into the shared PortfolioBook.
+
+        Args:
+            slot_id: Slot index.
+            symbol: Instrument ticker.
+            side: 'BUY' or 'SELL'.
+            quantity: Absolute quantity to trade.
+            bar: Current bar pd.Series for price reference.
+            execute_at_close: Fill at close price if True, else open.
+            reason: Tag written to the order.
+            effective_spread_ticks: Pre-computed tick count from the spread model.
+                                    If None, ExecutionHandler reads settings.spread_ticks.
         """
         spec = self.settings.get_instrument_spec(symbol)
         multiplier = spec["multiplier"]
@@ -270,7 +342,11 @@ class PortfolioBacktestEngine:
         )
 
         handler = self._execution_handlers[slot_id]
-        fill = handler.execute_order(order, bar, execute_at_close=execute_at_close)
+        fill = handler.execute_order(
+            order, bar,
+            execute_at_close=execute_at_close,
+            effective_spread_ticks=effective_spread_ticks,
+        )
 
         if fill:
             signed_qty = quantity if side == "BUY" else -quantity
@@ -341,7 +417,11 @@ class PortfolioBacktestEngine:
             return True
         return False
 
-    def _liquidate_all_eod(self, ts: Any) -> None:
+    def _liquidate_all_eod(
+        self,
+        ts: Any,
+        price_history: Dict[Tuple[int, str], "pd.Series"],
+    ) -> None:
         """
         Force-closes all open positions using each symbol's last-available bar.
 
@@ -355,6 +435,7 @@ class PortfolioBacktestEngine:
 
         Args:
             ts: Current union-timeline timestamp (used only as order tag).
+            price_history: (slot_id, symbol) -> close price Series for spread computation.
         """
         for (slot_id, symbol), qty in list(self.book.positions.items()):
             if qty == 0:
@@ -363,9 +444,11 @@ class PortfolioBacktestEngine:
             if bar is None:
                 continue
             side = "SELL" if qty > 0 else "BUY"
+            spread_ticks = self._effective_spread_ticks(slot_id, symbol, price_history, ts)
             self._execute_order(
                 slot_id, symbol, side, abs(qty), bar,
                 execute_at_close=True, reason="EOD_CLOSE",
+                effective_spread_ticks=spread_ticks,
             )
 
     # ── Main event loop ────────────────────────────────────────────────────────
@@ -390,11 +473,12 @@ class PortfolioBacktestEngine:
             for symbol in slot.symbols
         }
 
-        # Build price history series per symbol for vol estimation
-        price_history: Dict[str, pd.Series] = {}
-        for (sid, symbol), df in self._data_map.items():
-            if symbol not in price_history:
-                price_history[symbol] = df["close"]
+        # Build slot-local close series. The same structure is used by both:
+        # 1) spread estimation at execution time and 2) per-slot sizing volatility.
+        slot_price_history: Dict[Tuple[int, str], pd.Series] = {
+            (sid, symbol): df["close"]
+            for (sid, symbol), df in self._data_map.items()
+        }
 
         all_timestamps = pd.DatetimeIndex([])
         for df in self._data_map.values():
@@ -425,6 +509,7 @@ class PortfolioBacktestEngine:
             next_date    = all_dates[i + 1] if i + 1 < data_len else None
 
             # ── A. Fill pending orders (carry forward through gap bars) ──────────
+            # Spread ticks are computed per symbol from history available at ts.
             still_pending: List[Tuple[int, str, str, float, str]] = []
             for (slot_id, symbol, side, qty, reason) in pending_orders:
                 df = self._data_map.get((slot_id, symbol))
@@ -433,12 +518,17 @@ class PortfolioBacktestEngine:
                     continue
                 bar = df.loc[ts]
                 self._last_bars[(slot_id, symbol)] = bar  # keep cache current
-                self._execute_order(slot_id, symbol, side, qty, bar, reason=reason)
+                spread_ticks = self._effective_spread_ticks(slot_id, symbol, slot_price_history, ts)
+                self._execute_order(
+                    slot_id, symbol, side, qty, bar,
+                    reason=reason,
+                    effective_spread_ticks=spread_ticks,
+                )
             pending_orders = still_pending
 
             # ── B. Mark-to-market ────────────────────────────────────────────────
             prices = {
-                symbol: self._data_map[(sid, symbol)].loc[ts, "close"]
+                (sid, symbol): self._data_map[(sid, symbol)].loc[ts, "close"]
                 for (sid, symbol), df in self._data_map.items()
                 if ts in df.index
             }
@@ -458,7 +548,14 @@ class PortfolioBacktestEngine:
                         df = self._data_map.get((slot_id, symbol))
                         if df is not None and ts in df.index:
                             bar = df.loc[ts]
-                            self._liquidate_slot(slot_id, symbol, qty, bar, reason="RISK_LIQ")
+                            spread_ticks = self._effective_spread_ticks(
+                                slot_id, symbol, slot_price_history, ts
+                            )
+                            self._liquidate_slot(
+                                slot_id, symbol, qty, bar,
+                                reason="RISK_LIQ",
+                                effective_spread_ticks=spread_ticks,
+                            )
                 self.book.mark_to_market(prices, specs)
                 self.book.record_snapshot(ts, instrument_specs=specs)
                 continue
@@ -479,14 +576,20 @@ class PortfolioBacktestEngine:
             if signals:
                 # Build a truncated price history up to and including bar[t]
                 # so the vol estimate never looks ahead.
-                history_to_t: Dict[str, pd.Series] = {
-                    sym: series.loc[:ts]
-                    for sym, series in price_history.items()
+                history_to_t: Dict[Tuple[int, str], pd.Series] = {
+                    key: series.loc[:ts]
+                    for key, series in slot_price_history.items()
+                }
+                # Allocator.compute_targets expects current_prices keyed by symbol
+                # (str), not by (slot_id, symbol) tuple used by mark_to_market.
+                # Flatten here; all slots share the same instrument price.
+                symbol_prices: Dict[str, float] = {
+                    sym: p for (_, sym), p in prices.items()
                 }
                 new_targets = self.allocator.compute_targets(
                     signals,
                     self._allocation_equity,
-                    prices,
+                    symbol_prices,
                     specs,
                     history_to_t,
                     bars_per_year=self._bars_per_year,
@@ -510,15 +613,21 @@ class PortfolioBacktestEngine:
                 for (slot_id, symbol, side, qty, reason) in pending_orders:
                     bar = self._last_bars.get((slot_id, symbol))
                     if bar is not None:
-                        self._execute_order(slot_id, symbol, side, qty, bar,
-                                            execute_at_close=True, reason=reason)
+                        spread_ticks = self._effective_spread_ticks(
+                            slot_id, symbol, slot_price_history, ts
+                        )
+                        self._execute_order(
+                            slot_id, symbol, side, qty, bar,
+                            execute_at_close=True, reason=reason,
+                            effective_spread_ticks=spread_ticks,
+                        )
                     else:
                         still_pending.append((slot_id, symbol, side, qty, reason))
                 pending_orders = still_pending
 
                 # 2. Force-liquidate ALL open positions using last-available bar
                 #    (not ts — prevents silent skip on gap-bar symbols)
-                self._liquidate_all_eod(ts)
+                self._liquidate_all_eod(ts, slot_price_history)
 
                 # 3. Re-mark after all closings
                 self.book.mark_to_market(prices, specs)

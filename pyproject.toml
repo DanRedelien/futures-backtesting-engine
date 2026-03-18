@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Adds the repo root to sys.path so that `from src.backtest_engine...` resolves
+# without any manual PYTHONPATH export.
+pythonpath = ["."]
+testpaths = ["tests"]

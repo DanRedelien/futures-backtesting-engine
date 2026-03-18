@@ -26,7 +26,11 @@
             return;
         }
 
-        root.querySelectorAll(".terminal-tab").forEach((button) => {
+        // Only bind buttons that carry an explicit data-tab attribute.
+        // Secondary sub-view buttons inside panels use data-exit-detail-view
+        // instead; including them here would call activateTab("") and navigate
+        // the whole bottom panel away from Exit Analysis.
+        root.querySelectorAll(".terminal-tab[data-tab]").forEach((button) => {
             if (button.dataset.terminalTabBound === "true") {
                 return;
             }
@@ -73,26 +77,59 @@
     }
 
     function wireRiskMetricControls(root) {
-        const volSelect = root.querySelector ? root.querySelector("#risk-vol-window-select") : null;
-        const sharpeSelect = root.querySelector ? root.querySelector("#risk-sharpe-horizon-select") : null;
-        const volInput = document.getElementById("risk-vol-window-days-input");
-        const sharpeInput = document.getElementById("risk-sharpe-horizon-input");
+        void root;
+    }
 
-        if (volSelect && volInput && volSelect.dataset.terminalRiskVolBound !== "true") {
-            volSelect.dataset.terminalRiskVolBound = "true";
-            volSelect.addEventListener("change", function () {
-                volInput.value = volSelect.value || volInput.value;
-                activateTab("risk");
+    function wireExitDetailSubViews(root) {
+        root.querySelectorAll("[data-exit-detail-view]").forEach((button) => {
+            if (button.dataset.terminalExitDetailBound === "true") {
+                return;
+            }
+            button.dataset.terminalExitDetailBound = "true";
+            button.addEventListener("click", function () {
+                const view = button.dataset.exitDetailView || "trade-log";
+                const viewInput = document.getElementById("exit-detail-view-input");
+                if (viewInput) {
+                    viewInput.value = view;
+                }
+                const nav = button.closest("nav");
+                if (nav) {
+                    nav.querySelectorAll(".terminal-tab").forEach((tab) => {
+                        tab.classList.toggle("is-active", tab === button);
+                    });
+                }
+                document.body.dispatchEvent(new Event("exit-detail-change"));
             });
-        }
+        });
+    }
 
-        if (sharpeSelect && sharpeInput && sharpeSelect.dataset.terminalRiskSharpeBound !== "true") {
-            sharpeSelect.dataset.terminalRiskSharpeBound = "true";
-            sharpeSelect.addEventListener("change", function () {
-                sharpeInput.value = sharpeSelect.value || sharpeInput.value;
-                activateTab("risk");
+    function wireExitSummaryRows(root) {
+        root.querySelectorAll("tr[data-exit-strategy]").forEach((row) => {
+            if (row.dataset.terminalExitStrategyBound === "true") {
+                return;
+            }
+            row.dataset.terminalExitStrategyBound = "true";
+            row.addEventListener("click", function () {
+                const strategy = row.dataset.exitStrategy || "__all__";
+                // Programmatic assignment does not fire a 'change' event, so the
+                // full bottom-panel refresh is not triggered — only the workspace
+                // detail fires via exit-detail-change below.
+                const strategySelect = document.querySelector(
+                    '#dashboard-filters [name="exit_strategy"]'
+                );
+                if (strategySelect) {
+                    strategySelect.value = strategy;
+                }
+                // Mark selected row and clear others in the same tbody.
+                const tbody = row.closest("tbody");
+                if (tbody) {
+                    tbody.querySelectorAll("tr.terminal-table__row--clickable").forEach((r) => {
+                        r.classList.toggle("is-selected", r === row);
+                    });
+                }
+                document.body.dispatchEvent(new Event("exit-detail-change"));
             });
-        }
+        });
     }
 
     function initResize() {
@@ -240,6 +277,8 @@
         wireTabJumpButtons(document);
         wireTableSort(root);
         wireRiskMetricControls(root);
+        wireExitDetailSubViews(root);
+        wireExitSummaryRows(root);
         if (typeof TerminalUI.initCharts === "function") {
             TerminalUI.initCharts(root);
         }
@@ -253,6 +292,8 @@
     TerminalUI.wireTabJumpButtons = wireTabJumpButtons;
     TerminalUI.wireTableSort = wireTableSort;
     TerminalUI.wireRiskMetricControls = wireRiskMetricControls;
+    TerminalUI.wireExitDetailSubViews = wireExitDetailSubViews;
+    TerminalUI.wireExitSummaryRows = wireExitSummaryRows;
     TerminalUI.initResize = initResize;
 
     document.addEventListener("DOMContentLoaded", function () {

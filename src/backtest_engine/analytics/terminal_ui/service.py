@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import unquote_plus
 
 import pandas as pd
 
@@ -359,6 +360,41 @@ def _format_ratio(value: float) -> str:
     return f"{float(value):.2f}"
 
 
+def _format_p_value(value: float) -> str:
+    """Formats p-values with enough precision for significance interpretation."""
+    if pd.isna(value):
+        return "N/A"
+    p_value = float(value)
+    if p_value < 0.0:
+        return "N/A"
+    if p_value < 0.0001:
+        return "<0.0001"
+    if p_value < 0.01:
+        return f"{p_value:.4f}"
+    return f"{p_value:.3f}"
+
+
+def _canonicalize_risk_scope_token(value: str) -> str:
+    """Canonicalizes one scope token so '+' and spaces resolve consistently."""
+    decoded = unquote_plus(str(value or "").strip())
+    # Strategy labels may travel through query strings where '+' can become spaces.
+    return " ".join(decoded.replace("+", " ").split())
+
+
+def _resolve_slot_id_for_risk_scope(
+    slots: Dict[str, str],
+    risk_scope: str,
+) -> Optional[str]:
+    """Resolves a portfolio slot id from a risk scope label with tolerant matching."""
+    canonical_scope = _canonicalize_risk_scope_token(risk_scope)
+    if not canonical_scope:
+        return None
+    for slot_id, strategy_name in (slots or {}).items():
+        if _canonicalize_risk_scope_token(strategy_name) == canonical_scope:
+            return str(slot_id)
+    return None
+
+
 def _build_risk_profile_for_scope(
     bundle: ResultBundle,
     runtime: TerminalRuntimeContext,
@@ -367,17 +403,16 @@ def _build_risk_profile_for_scope(
 ) -> RiskProfile:
     """Builds a risk profile for portfolio, single, or one selected strategy."""
     if bundle.run_type == "portfolio" and risk_scope not in {"portfolio", "single"}:
-        slot_lookup = {strategy_name: slot_id for slot_id, strategy_name in (bundle.slots or {}).items()}
-        if risk_scope in slot_lookup:
-            slot_id = slot_lookup[risk_scope]
+        slot_id = _resolve_slot_id_for_risk_scope(bundle.slots or {}, risk_scope)
+        if slot_id is not None:
+            slot_weights = bundle.slot_weights or {}
+            slot_weight_value = slot_weights.get(slot_id)
+            if slot_weight_value is None:
+                slot_weight_value = slot_weights.get(int(slot_id)) if slot_id.isdigit() else None
             strategy_equity = build_strategy_equity_curve(
                 history=bundle.history,
                 slot_id=str(slot_id),
-                slot_weight=(
-                    float(bundle.slot_weights.get(slot_id))
-                    if bundle.slot_weights and slot_id in bundle.slot_weights
-                    else None
-                ),
+                slot_weight=float(slot_weight_value) if slot_weight_value is not None else None,
                 slot_count=len(bundle.slots or {}),
             )
             strategy_trades = (

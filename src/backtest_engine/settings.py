@@ -41,6 +41,7 @@ class BacktestSettings(BaseSettings):
         description="RQ queue name for terminal-driven async scenario jobs.",
     )
 
+
     # ── Primary instrument ─────────────────────────────────────────────────────
     default_symbol: str = "ES"
 
@@ -53,9 +54,23 @@ class BacktestSettings(BaseSettings):
     initial_capital: float = 1_000_000.0
     risk_free_rate: float = 0.02
     commission_rate: float = 2.5      # Per contract, in dollars
-    max_slippage_ticks: int = 1       # Random slippage: uniform in [0, max]
     fixed_qty: int = 1                # Default number of contracts per signal
-    random_seed: int = 42             # Seed for reproducible slippage simulation
+
+    # ── Deterministic spread model ─────────────────────────────────────────────
+    # Controls how fill-price adjustments are computed.  No random component.
+    #
+    # spread_mode: 'static' applies spread_ticks on every fill unchanged.
+    #              'adaptive_volatility' widens/narrows spread_ticks based on
+    #              realized volatility relative to a rolling baseline.
+    #
+    # BUY  fills: executed_price = price + spread_ticks * tick_size
+    # SELL fills: executed_price = price - spread_ticks * tick_size
+    spread_mode: str = "adaptive_volatility"
+    spread_ticks: int = 1                      # Base tick count per fill (0 = no spread)
+    spread_volatility_step_pct: float = 0.10   # Vol band width per adaptive step (10 %)
+    spread_step_multiplier: float = 1.5        # Multiplier per adaptive step above/below baseline
+    spread_vol_lookback: int = 20              # Bars for current realized vol (short window)
+    spread_vol_baseline_lookback: int = 100    # Bars for baseline vol (long reference window)
 
     # ── Trading hours (exchange time, HH:MM strings) ───────────────────────────
     use_trading_hours: bool = True               # Toggle to enable/disable trading session limits

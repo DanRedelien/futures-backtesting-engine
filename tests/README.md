@@ -13,7 +13,7 @@ pytest tests/unit/test_metrics.py
 ```
 
 ## Notes
-- Set `PYTHONPATH=.` when running `pytest` directly in environments that do not auto-resolve the `src/` package.
+- `pyproject.toml` at the repo root configures `pythonpath = ["."]` for pytest, so no manual `PYTHONPATH` export is needed.
 - Shared artifact writers and job builders live in `tests/conftest.py`.
 
 ## Test Inventory

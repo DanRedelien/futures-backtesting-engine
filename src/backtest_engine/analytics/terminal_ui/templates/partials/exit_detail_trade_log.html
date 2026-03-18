@@ -1,0 +1,55 @@
+<div class="exit-detail-view">
+    <div class="exit-detail-view__header">
+        <span>{{ exit_strategy_label }}</span>
+    </div>
+    {% if detail_rows %}
+    <div class="terminal-table-wrap">
+        <table class="terminal-table">
+            <thead>
+                <tr>
+                    {% for column in detail_columns %}
+                    <th>{{ column }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in detail_rows %}
+                <tr>
+                    {% for column in detail_columns %}
+                    <td>{{ row.get(column, "") }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="terminal-pagination">
+        <button
+            type="button"
+            class="terminal-button"
+            {% if not has_prev %}disabled{% endif %}
+            hx-get="/partials/exit-analysis/detail?exit_detail_view=trade-log&page={{ page - 1 }}"
+            hx-include="#dashboard-filters"
+            hx-target="#exit-detail-workspace"
+            hx-swap="innerHTML"
+        >
+            Previous
+        </button>
+        <span>Page {{ page }} / {{ total_pages }}</span>
+        <button
+            type="button"
+            class="terminal-button"
+            {% if not has_next %}disabled{% endif %}
+            hx-get="/partials/exit-analysis/detail?exit_detail_view=trade-log&page={{ page + 1 }}"
+            hx-include="#dashboard-filters"
+            hx-target="#exit-detail-workspace"
+            hx-swap="innerHTML"
+        >
+            Next
+        </button>
+    </div>
+    {% else %}
+    <div class="terminal-empty-state">No trade records found for the selected filter.</div>
+    {% endif %}
+</div>

@@ -1,3 +1,14 @@
+"""
+test_terminal_ui_shell.py
+
+Tests for the terminal-UI application shell:
+  - Root page rendering (portfolio & single-asset modes)
+  - Core chart / partial endpoints
+  - PnL-distribution scope resolution
+  - Fragment-level error handling for HTMX partials
+  - Equity chart drawdown overlay contract
+  - Dashboard resize handles
+"""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -8,13 +19,22 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from src.backtest_engine.analytics.dashboard.core.data_layer import ResultBundle
+from src.backtest_engine.analytics.dashboard.risk_analysis.models import StressMultipliers
+from src.backtest_engine.analytics.terminal_ui.app import create_terminal_dashboard_app
 from src.backtest_engine.analytics.terminal_ui.chart_builders import (
     build_equity_chart_payload,
+    build_pnl_distribution_payload,
 )
-from src.backtest_engine.analytics.terminal_ui.app import create_terminal_dashboard_app
 from src.backtest_engine.analytics.terminal_ui.service import (
+    _build_risk_profile_for_scope,
+    load_terminal_bundle,
     load_terminal_runtime_context,
 )
+
+
+# ---------------------------------------------------------------------------
+# Shell rendering
+# ---------------------------------------------------------------------------
 
 
 def test_terminal_ui_root_renders_portfolio_shell(
@@ -56,6 +76,81 @@ def test_terminal_ui_chart_endpoints_return_json_payloads(
     assert "series" in risk_response.json()
 
 
+def test_pnl_distribution_payload_changes_with_strategy_risk_scope(
+    tmp_path: Path,
+    make_portfolio_bundle: Callable[..., None],
+) -> None:
+    """PnL distribution must use selected strategy scope, not only portfolio equity."""
+    results_root = tmp_path / "results"
+    make_portfolio_bundle(results_root)
+    bundle = load_terminal_bundle(results_dir=str(results_root))
+    assert bundle is not None
+
+    portfolio_payload = build_pnl_distribution_payload(bundle, risk_scope="portfolio")
+    strategy_payload = build_pnl_distribution_payload(bundle, risk_scope="StrategyA")
+
+    assert portfolio_payload["summary"]["mean"] == 75.0
+    assert strategy_payload["summary"]["mean"] == 85.0
+    assert strategy_payload["summary"]["mean"] != portfolio_payload["summary"]["mean"]
+
+
+def test_pnl_distribution_chart_endpoint_respects_risk_scope(
+    tmp_path: Path,
+    make_portfolio_bundle: Callable[..., None],
+) -> None:
+    """Chart endpoint should accept risk_scope and return scope-specific stats."""
+    results_root = tmp_path / "results"
+    make_portfolio_bundle(results_root)
+    client = TestClient(create_terminal_dashboard_app(results_dir=str(results_root)))
+
+    portfolio_response = client.get("/api/charts/pnl-distribution?risk_scope=portfolio")
+    strategy_response = client.get("/api/charts/pnl-distribution?risk_scope=StrategyA")
+
+    assert portfolio_response.status_code == 200
+    assert strategy_response.status_code == 200
+    assert portfolio_response.json()["summary"]["mean"] == 75.0
+    assert strategy_response.json()["summary"]["mean"] == 85.0
+
+
+def test_pnl_distribution_scope_matching_tolerates_plus_vs_space(
+    tmp_path: Path,
+    make_portfolio_bundle: Callable[..., None],
+) -> None:
+    """Strategy scope resolution should treat plus-sign and space labels equally."""
+    results_root = tmp_path / "results"
+    make_portfolio_bundle(results_root)
+    bundle = load_terminal_bundle(results_dir=str(results_root))
+    assert bundle is not None
+
+    bundle.slots["0"] = "Strategy+Alpha"
+    plus_payload = build_pnl_distribution_payload(bundle, risk_scope="Strategy+Alpha")
+    space_payload = build_pnl_distribution_payload(bundle, risk_scope="Strategy Alpha")
+
+    assert plus_payload["summary"]["mean"] == 85.0
+    assert space_payload["summary"]["mean"] == plus_payload["summary"]["mean"]
+
+
+def test_risk_profile_scope_matching_tolerates_plus_vs_space(
+    tmp_path: Path,
+    make_portfolio_bundle: Callable[..., None],
+) -> None:
+    """Risk scope fallback to portfolio should not happen on plus/space label drift."""
+    results_root = tmp_path / "results"
+    make_portfolio_bundle(results_root)
+    bundle = load_terminal_bundle(results_dir=str(results_root))
+    assert bundle is not None
+    bundle.slots["0"] = "Strategy+Alpha"
+
+    runtime = load_terminal_runtime_context()
+    stress = StressMultipliers(volatility=1.0, slippage=1.0, commission=1.0)
+    profile_plus = _build_risk_profile_for_scope(bundle, runtime, "Strategy+Alpha", stress)
+    profile_space = _build_risk_profile_for_scope(bundle, runtime, "Strategy Alpha", stress)
+    profile_portfolio = _build_risk_profile_for_scope(bundle, runtime, "portfolio", stress)
+
+    assert profile_space.summary["total_pnl"] == profile_plus.summary["total_pnl"]
+    assert profile_space.summary["total_pnl"] != profile_portfolio.summary["total_pnl"]
+
+
 def test_terminal_ui_single_mode_hides_portfolio_only_tabs(
     tmp_path: Path,
     make_single_bundle: Callable[..., None],
@@ -74,7 +169,7 @@ def test_terminal_ui_single_mode_hides_portfolio_only_tabs(
 
 
 # ---------------------------------------------------------------------------
-# Bug-fix coverage: fragment-level error HTML for partial routes
+# Fragment-level error HTML for partial routes
 # ---------------------------------------------------------------------------
 
 
@@ -152,7 +247,7 @@ def test_root_returns_full_shell_error_when_no_bundle(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bug-fix coverage: drawdown overlay in equity chart payload
+# Equity chart drawdown overlay
 # ---------------------------------------------------------------------------
 
 
@@ -260,7 +355,7 @@ def test_equity_chart_payload_keeps_full_history_for_long_portfolio_runs() -> No
 
 
 # ---------------------------------------------------------------------------
-# Bug-fix coverage: resize handles present in rendered HTML
+# Resize handles
 # ---------------------------------------------------------------------------
 
 

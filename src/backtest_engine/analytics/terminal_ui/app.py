@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -20,9 +19,6 @@ from src.backtest_engine.analytics.terminal_ui.routes_operations import (
 from src.backtest_engine.analytics.terminal_ui.routes_partials import (
     register_partial_routes,
 )
-from src.backtest_engine.analytics.terminal_ui.constants import (
-    DEFAULT_RISK_SHARPE_HORIZON,
-)
 from src.backtest_engine.analytics.terminal_ui.service import (
     inspect_terminal_bundle,
     load_terminal_bundle,
@@ -37,6 +33,21 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _TODO_PATH = _PROJECT_ROOT / "TODO.md"
+
+
+def _build_static_asset_version() -> str:
+    """Builds a cache-busting token from current static asset mtimes."""
+    static_files = (
+        _STATIC_DIR / "terminal.css",
+        _STATIC_DIR / "terminal.js",
+        _STATIC_DIR / "charts.js",
+        _STATIC_DIR / "operations.js",
+    )
+    existing_files = [path for path in static_files if path.exists()]
+    if not existing_files:
+        return "1"
+    latest_mtime_ns = max(path.stat().st_mtime_ns for path in existing_files)
+    return str(latest_mtime_ns)
 
 
 def _coerce_float(value: Optional[str], fallback: float) -> float:
@@ -82,6 +93,7 @@ def _render_bundle_error(
         {
             "request": request,
             "page_title": "Quant Terminal",
+            "static_asset_version": _build_static_asset_version(),
             "error_title": title,
             "error_message": message,
         },
@@ -175,12 +187,11 @@ def create_terminal_dashboard_app(results_dir: Optional[str] = None) -> FastAPI:
             {
                 "request": request,
                 "page_title": "Quant Terminal",
+                "static_asset_version": _build_static_asset_version(),
                 "shell": shell,
                 "loading_words": list(runtime.loading_words),
                 "loading_word_interval_ms": runtime.loading_word_interval_ms,
                 "loading_eta_per_request_seconds": runtime.loading_eta_per_request_seconds,
-                "default_risk_vol_window_days": runtime.risk_config.rolling_vol_windows[0],
-                "default_risk_sharpe_horizon": DEFAULT_RISK_SHARPE_HORIZON,
             },
         )
 

@@ -105,7 +105,7 @@ def _build_scenario_payload(
         "rerun_interpretation": {
             "target_portfolio_vol": float(base_target_vol) * float(stress.volatility),
             "commission_rate": float(settings.commission_rate) * float(stress.commission),
-            "max_slippage_ticks": max(0, int(round(float(settings.max_slippage_ticks) * float(stress.slippage)))),
+            "spread_ticks": max(0, int(round(float(settings.spread_ticks) * float(stress.slippage)))),
         },
         "baseline_reference": {
             "run_id": get_baseline_run_id(bundle),
@@ -187,8 +187,8 @@ def run_portfolio_scenario(
     env["QUANT_BACKTEST_COMMISSION_RATE"] = str(
         float(settings.commission_rate) * float(stress.commission)
     )
-    env["QUANT_BACKTEST_MAX_SLIPPAGE_TICKS"] = str(
-        max(0, int(round(float(settings.max_slippage_ticks) * float(stress.slippage))))
+    env["QUANT_BACKTEST_SPREAD_TICKS"] = str(
+        max(0, int(round(float(settings.spread_ticks) * float(stress.slippage))))
     )
 
     command = [

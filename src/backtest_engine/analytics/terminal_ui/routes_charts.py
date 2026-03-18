@@ -14,6 +14,13 @@ from src.backtest_engine.analytics.terminal_ui.chart_builders import (
     build_rolling_sharpe_payload,
     build_strategy_correlation_payload,
 )
+from src.backtest_engine.analytics.terminal_ui.exit_chart_builders import (
+    build_exit_holding_time_payload,
+    build_exit_mfe_mae_payload,
+    build_exit_pnl_decay_payload,
+    build_exit_reason_payload,
+    build_exit_vol_regime_payload,
+)
 from src.backtest_engine.analytics.terminal_ui.constants import (
     DECOMPOSITION_SORT_COLUMN,
     DEFAULT_CORRELATION_HORIZON,
@@ -68,12 +75,16 @@ def register_chart_routes(
         return JSONResponse(build_rolling_sharpe_payload(bundle, runtime))
 
     @app.get("/api/charts/pnl-distribution", response_class=JSONResponse)
-    def pnl_distribution_chart() -> JSONResponse:
+    def pnl_distribution_chart(
+        risk_scope: str = "portfolio",
+    ) -> JSONResponse:
         """Returns JSON for the daily PnL distribution chart."""
         bundle, error_response = _load_bundle_json()
         if error_response is not None:
             return error_response
-        return JSONResponse(build_pnl_distribution_payload(bundle))
+        return JSONResponse(
+            build_pnl_distribution_payload(bundle, risk_scope=risk_scope)
+        )
 
     @app.get("/api/charts/decomposition", response_class=JSONResponse)
     def decomposition_chart(sort_by: str = DECOMPOSITION_SORT_COLUMN) -> JSONResponse:
@@ -150,3 +161,43 @@ def register_chart_routes(
             risk_scope=risk_scope,
             stress=stress,
         )
+
+    @app.get("/api/charts/exit-mfe-mae", response_class=JSONResponse)
+    def exit_mfe_mae_chart(strategy: str = "__all__") -> JSONResponse:
+        """Returns the MFE vs MAE scatter payload for the selected strategy."""
+        bundle, error_response = _load_bundle_json()
+        if error_response is not None:
+            return error_response
+        return JSONResponse(build_exit_mfe_mae_payload(bundle, strategy_name=strategy))
+
+    @app.get("/api/charts/exit-pnl-decay", response_class=JSONResponse)
+    def exit_pnl_decay_chart(strategy: str = "__all__") -> JSONResponse:
+        """Returns the PnL decay forward-horizon payload for the selected strategy."""
+        bundle, error_response = _load_bundle_json()
+        if error_response is not None:
+            return error_response
+        return JSONResponse(build_exit_pnl_decay_payload(bundle, strategy_name=strategy))
+
+    @app.get("/api/charts/exit-holding-time", response_class=JSONResponse)
+    def exit_holding_time_chart(strategy: str = "__all__") -> JSONResponse:
+        """Returns the holding-time bar payload for the selected strategy."""
+        bundle, error_response = _load_bundle_json()
+        if error_response is not None:
+            return error_response
+        return JSONResponse(build_exit_holding_time_payload(bundle, strategy_name=strategy))
+
+    @app.get("/api/charts/exit-vol-regime", response_class=JSONResponse)
+    def exit_vol_regime_chart(strategy: str = "__all__") -> JSONResponse:
+        """Returns the entry-volatility regime bar payload for the selected strategy."""
+        bundle, error_response = _load_bundle_json()
+        if error_response is not None:
+            return error_response
+        return JSONResponse(build_exit_vol_regime_payload(bundle, strategy_name=strategy))
+
+    @app.get("/api/charts/exit-reason", response_class=JSONResponse)
+    def exit_reason_chart(strategy: str = "__all__") -> JSONResponse:
+        """Returns the exit-reason bar payload for the selected strategy."""
+        bundle, error_response = _load_bundle_json()
+        if error_response is not None:
+            return error_response
+        return JSONResponse(build_exit_reason_payload(bundle, strategy_name=strategy))
