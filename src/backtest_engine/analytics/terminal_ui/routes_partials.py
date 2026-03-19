@@ -220,6 +220,20 @@ def register_partial_routes(
                 },
             )
 
+        if tab == "stress-testing":
+            context = build_operations_context(
+                bundle,
+                launch_stress=stress,
+            )
+            return templates.TemplateResponse(
+                request,
+                "partials/panel_stress_testing.html",
+                {
+                    "request": request,
+                    **context,
+                },
+            )
+
         if tab == "exit-analysis":
             summary = build_exit_summary_table(bundle)
             return templates.TemplateResponse(
@@ -237,7 +251,7 @@ def register_partial_routes(
         if tab == "operations":
             context = build_operations_context(
                 bundle,
-                selected_job_id=request.query_params.get("selected_job_id"),
+                launch_stress=stress,
             )
             return templates.TemplateResponse(
                 request,

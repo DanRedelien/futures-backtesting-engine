@@ -1,4 +1,5 @@
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,7 @@ from src.backtest_engine.analytics.terminal_ui.routes_operations import (
 from src.backtest_engine.analytics.terminal_ui.routes_partials import (
     register_partial_routes,
 )
+from src.backtest_engine.analytics.terminal_ui.worker_manager import LocalRedisManager, LocalWorkerManager
 from src.backtest_engine.analytics.terminal_ui.service import (
     inspect_terminal_bundle,
     load_terminal_bundle,
@@ -58,6 +60,28 @@ def _coerce_float(value: Optional[str], fallback: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _parse_local_redis_url(redis_url: Optional[str]) -> Optional[tuple[str, int]]:
+    """
+    Extracts host and port from a redis URL, returning None for remote URLs.
+
+    Methodology:
+        Only localhost/127.0.0.1/::1 qualify as local. Remote URLs are left
+        to the user's own infrastructure; the managed redis button is hidden.
+    """
+    if not redis_url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(redis_url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 6379
+        if host not in {"localhost", "127.0.0.1", "::1"}:
+            return None
+        return host, port
+    except Exception:
+        return None
 
 
 def _coerce_int(value: Optional[str], fallback: int) -> int:
@@ -121,13 +145,54 @@ def create_terminal_dashboard_app(results_dir: Optional[str] = None) -> FastAPI:
     """
     runtime = load_terminal_runtime_context()
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
-    app = FastAPI(title="Quant Terminal Dashboard", docs_url=None, redoc_url=None)
-    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-    job_service = ScenarioJobService(results_dir=results_dir, config=runtime.queue_config)
+    worker_manager = LocalWorkerManager(
+        config=runtime.queue_config,
+        results_dir=results_dir,
+        project_root=_PROJECT_ROOT,
+    )
+    local_redis_coords = _parse_local_redis_url(runtime.queue_config.redis_url)
+    redis_manager: Optional[LocalRedisManager] = None
+    if local_redis_coords is not None:
+        redis_manager = LocalRedisManager(
+            host=local_redis_coords[0],
+            port=local_redis_coords[1],
+            results_dir=results_dir,
+            project_root=_PROJECT_ROOT,
+        )
+    job_service = ScenarioJobService(
+        results_dir=results_dir,
+        config=runtime.queue_config,
+        worker_manager=worker_manager,
+        redis_manager=redis_manager,
+    )
     build_operations_context = make_operations_context_builder(
         job_service=job_service,
         todo_path=_TODO_PATH,
     )
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        """Stops the managed worker and redis-server when the dashboard process exits."""
+        try:
+            yield
+        finally:
+            try:
+                worker_manager.stop_worker()
+            except Exception:
+                pass
+            if redis_manager is not None:
+                try:
+                    redis_manager.stop_redis()
+                except Exception:
+                    pass
+
+    app = FastAPI(
+        title="Quant Terminal Dashboard",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=_lifespan,
+    )
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     def _load_bundle_or_error(request: Request) -> tuple[Optional[Any], Optional[HTMLResponse]]:
         """Returns bundle or a full-shell error response."""

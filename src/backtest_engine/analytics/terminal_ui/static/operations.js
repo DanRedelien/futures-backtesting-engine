@@ -1,6 +1,7 @@
 (function () {
     const TerminalUI = (window.TerminalUI = window.TerminalUI || {});
     const jobEventSources = {};
+    let workerRefreshTimer = null;
 
     function syncInitialProgress(card) {
         const bar = card.querySelector('[data-job-field="progress_bar"]');
@@ -11,15 +12,9 @@
         bar.style.width = String(progressPct) + "%";
     }
 
-    function setSelectedJobId(jobId) {
-        const input = document.getElementById("selected-job-id-input");
-        if (input) {
-            input.value = jobId || "";
-        }
-    }
-
     function updateJobCard(card, payload) {
         const status = card.querySelector('[data-job-field="status"]');
+        const stage = card.querySelector('[data-job-field="progress_stage_label"]');
         const current = card.querySelector('[data-job-field="progress_current"]');
         const total = card.querySelector('[data-job-field="progress_total"]');
         const bar = card.querySelector('[data-job-field="progress_bar"]');
@@ -30,6 +25,9 @@
 
         if (status) {
             status.textContent = payload.status || "unknown";
+        }
+        if (stage) {
+            stage.textContent = payload.progress_stage_label || "Waiting for worker";
         }
         if (current) {
             current.textContent = String(payload.progress_current || 0);
@@ -66,17 +64,38 @@
         delete jobEventSources[jobId];
     }
 
+    const AUTO_REFRESH_STATES = ["worker_starting", "redis_starting", "install_running"];
+
+    function scheduleAutoRefresh() {
+        if (workerRefreshTimer) {
+            window.clearTimeout(workerRefreshTimer);
+            workerRefreshTimer = null;
+        }
+        const panel = document.querySelector('[data-worker-readiness-state]');
+        if (!panel) {
+            return;
+        }
+        const state = panel.dataset.workerReadinessState || "";
+        if (!AUTO_REFRESH_STATES.includes(state)) {
+            return;
+        }
+        const refreshMs = Number(panel.dataset.workerRefreshMs || 2000);
+        const delayMs = Number.isFinite(refreshMs) && refreshMs > 0 ? refreshMs : 2000;
+        workerRefreshTimer = window.setTimeout(function () {
+            workerRefreshTimer = null;
+            document.body.dispatchEvent(new Event("dashboard-tab-change"));
+        }, delayMs);
+    }
+
     TerminalUI.initOperations = function () {
         const cards = document.querySelectorAll(".terminal-job-card[data-job-stream-url]");
         cards.forEach((card) => {
-            const jobId = card.dataset.selectedJobId || "";
+            const jobId = card.dataset.jobId || "";
             const streamUrl = card.dataset.jobStreamUrl || "";
             syncInitialProgress(card);
             if (!jobId || !streamUrl || typeof window.EventSource === "undefined") {
                 return;
             }
-
-            setSelectedJobId(jobId);
 
             const existing = jobEventSources[jobId];
             if (existing && existing.card === card && existing.url === streamUrl) {
@@ -101,11 +120,12 @@
 
         Object.keys(jobEventSources).forEach((jobId) => {
             const match = document.querySelector(
-                '.terminal-job-card[data-selected-job-id="' + jobId + '"]',
+                '.terminal-job-card[data-job-id="' + jobId + '"]',
             );
             if (!match) {
                 closeJobStream(jobId);
             }
         });
+        scheduleAutoRefresh();
     };
 })();

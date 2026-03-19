@@ -184,6 +184,12 @@ def _build_terminal_runtime_context(
             sse_max_updates_per_second=float(
                 _setting_value(resolved_settings, "terminal_sse_max_updates_per_second", 2.0)
             ),
+            worker_start_grace_seconds=float(
+                _setting_value(resolved_settings, "terminal_worker_start_grace_seconds", 2.0)
+            ),
+            worker_stop_timeout_seconds=float(
+                _setting_value(resolved_settings, "terminal_worker_stop_timeout_seconds", 2.0)
+            ),
         ),
         benchmark_color=str(_setting_value(resolved_settings, "terminal_benchmark_color", "#777777")),
         strategy_colors=tuple(

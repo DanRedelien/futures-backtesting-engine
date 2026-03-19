@@ -1,0 +1,77 @@
+<article
+    class="terminal-job-card"
+    {% if job.status in ["queued", "running"] %}
+    data-job-stream-url="/api/jobs/{{ job.job_id }}/events"
+    data-job-id="{{ job.job_id }}"
+    {% endif %}
+>
+    <div class="terminal-job-card__row">
+        <span>Job</span>
+        <strong>{{ job.job_id }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Status</span>
+        <strong data-job-field="status">{{ job.status }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Stage</span>
+        <strong data-job-field="progress_stage_label">{{ job.progress_stage_label or "Waiting for worker" }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Progress</span>
+        <strong>
+            <span data-job-field="progress_current">{{ job.progress_current }}</span>
+            /
+            <span data-job-field="progress_total">{{ job.progress_total }}</span>
+        </strong>
+    </div>
+    <div class="terminal-progress">
+        <div
+            class="terminal-progress__bar"
+            data-job-field="progress_bar"
+            data-progress-pct="{{ job.progress_pct }}"
+            style="width: 0%;"
+        ></div>
+    </div>
+    <div class="terminal-job-card__message" data-job-field="progress_message">{{ job.progress_message or "Waiting for worker." }}</div>
+    <div class="terminal-job-card__row">
+        <span>Type</span>
+        <strong>{{ job.job_type }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Family</span>
+        <strong>{{ job.scenario_family or "N/A" }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Created</span>
+        <strong>{{ job.created_at }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Duration</span>
+        <strong data-job-field="duration_seconds">
+            {% if job.duration_seconds is not none %}
+            {{ "%.1f"|format(job.duration_seconds) }}s
+            {% else %}
+            N/A
+            {% endif %}
+        </strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Output</span>
+        <strong data-job-field="output_artifact_path">{{ job.output_artifact_path or "Pending" }}</strong>
+    </div>
+    <div class="terminal-job-card__row">
+        <span>Error</span>
+        <strong data-job-field="last_error">{{ job.last_error or "None" }}</strong>
+    </div>
+    {% if job.status in ["queued", "running"] %}
+    <form
+        hx-post="/api/jobs/{{ job.job_id }}/cancel"
+        hx-target="#bottom-panel"
+        hx-swap="innerHTML"
+        style="margin-top: 0.5rem;"
+    >
+        <button class="terminal-button terminal-button--secondary" type="submit">Cancel Job</button>
+    </form>
+    {% endif %}
+</article>

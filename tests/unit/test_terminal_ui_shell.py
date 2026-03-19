@@ -51,7 +51,9 @@ def test_terminal_ui_root_renders_portfolio_shell(
     assert response.status_code == 200
     assert "Quant Terminal" in response.text
     assert "PnL Distribution" in response.text
+    assert "Stress Testing" in response.text
     assert "Correlations" in response.text
+    assert "Open Stress Testing" in response.text
 
 
 def test_terminal_ui_chart_endpoints_return_json_payloads(
@@ -164,6 +166,7 @@ def test_terminal_ui_single_mode_hides_portfolio_only_tabs(
 
     assert response.status_code == 200
     assert "Strategy Stats" in response.text
+    assert "Stress Testing" in response.text
     assert "Decomposition" not in response.text
     assert "Correlations" not in response.text
 

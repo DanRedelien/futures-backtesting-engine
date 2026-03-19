@@ -14,7 +14,7 @@
     <aside class="terminal-sidebar">
         <div class="terminal-sidebar__section">
             {# Bump the visible terminal version for significant UI updates: 3.0 -> 3.1 -> 3.2. #}
-            <div class="terminal-kicker">Version 4.1</div>
+            <div class="terminal-kicker">Version 4.3</div>
             <h1>Quant Terminal</h1>
             <div class="terminal-sidebar__meta">
                 <div><span>Mode</span><strong>{{ shell.mode_label }}</strong></div>
@@ -26,7 +26,6 @@
 
         <form id="dashboard-filters" class="terminal-sidebar__section">
             <input type="hidden" name="tab" id="dashboard-tab-input" value="{{ shell.default_tab }}">
-            <input type="hidden" name="selected_job_id" id="selected-job-id-input" value="">
             <input type="hidden" name="decomposition_sort_by" id="decomposition-sort-by-input" value="">
             <input type="hidden" name="strategy_stats_sort_by" id="strategy-stats-sort-by-input" value="">
             <input type="hidden" name="exit_detail_view" id="exit-detail-view-input" value="trade-log">
@@ -81,7 +80,7 @@
 
         <div class="terminal-sidebar__section">
             <div class="terminal-sidebar__notice">{{ shell.scenario_notice }}</div>
-            <button class="terminal-button" type="button" data-tab-jump="operations">Open Operations</button>
+            <button class="terminal-button" type="button" data-tab-jump="stress-testing">Open Stress Testing</button>
         </div>
     </aside>
 

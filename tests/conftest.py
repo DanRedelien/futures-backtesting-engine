@@ -196,24 +196,45 @@ def seed_scenario_job() -> Callable[..., ScenarioJobMetadata]:
     def _seed_scenario_job(
         results_root: Path,
         *,
+        job_id: str = "scenario-job-seeded",
         status: str = "completed",
         baseline_run_id: str = "portfolio-001",
+        created_at: str = "2026-03-14T00:00:00+00:00",
     ) -> ScenarioJobMetadata:
         store = ScenarioJobStore(results_dir=str(results_root))
         metadata = ScenarioJobMetadata(
-            job_id="scenario-job-seeded",
+            job_id=job_id,
             status=status,
-            created_at="2026-03-14T00:00:00+00:00",
+            created_at=created_at,
             baseline_results_dir=str(results_root.resolve()),
             baseline_run_id=baseline_run_id,
             scenario_type="stress_rerun",
-            scenario_params={"volatility": 2.0, "slippage": 3.0, "commission": 2.0},
+            scenario_params={
+                "name": "stress-rerun-portfolio-001",
+                "job_type": "stress_rerun",
+                "scenario_family": "execution_shock",
+                "artifact_family": "scenarios",
+            },
             timeout_seconds=1800,
             max_retries=2,
             failure_state="failed",
             queue_name="terminal-scenarios",
+            job_type="stress_rerun",
+            scenario_family="execution_shock",
+            artifact_family="scenarios",
+            progress_stage_id="finalize_metadata" if status == "completed" else "load_baseline",
+            progress_stage_label="Finalize metadata" if status == "completed" else "Load baseline",
+            progress_stage_order=7 if status == "completed" else 1,
+            progress_stage_count=7,
+            input_contract_version="scenario-spec.v1",
+            scenario_spec={
+                "name": "stress-rerun-portfolio-001",
+                "job_type": "stress_rerun",
+                "scenario_family": "execution_shock",
+                "artifact_family": "scenarios",
+            },
             progress_current=3 if status == "completed" else 1,
-            progress_total=3,
+            progress_total=7,
             progress_message=(
                 "Scenario artifacts completed."
                 if status == "completed"
@@ -223,10 +244,10 @@ def seed_scenario_job() -> Callable[..., ScenarioJobMetadata]:
             completed_at="2026-03-14T00:00:12+00:00" if status == "completed" else "",
             duration_seconds=7.0 if status == "completed" else None,
             output_artifact_path=str(
-                (results_root / "scenarios" / "scenario-job-seeded" / "portfolio").resolve()
+                (results_root / "scenarios" / job_id / "portfolio").resolve()
             ),
             artifact_paths=[
-                str((results_root / "scenarios" / "scenario-job-seeded" / "portfolio").resolve())
+                str((results_root / "scenarios" / job_id / "portfolio").resolve())
             ],
             rq_job_id="rq-job-seeded",
             last_error="",

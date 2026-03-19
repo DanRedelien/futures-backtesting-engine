@@ -1,0 +1,301 @@
+{% set effective_readiness_state = "install_running" if install_state.status == "running" else queue_status.readiness_state %}
+<section
+    class="terminal-panel__stack"
+    data-worker-readiness-state="{{ effective_readiness_state }}"
+    data-worker-refresh-ms="{{ queue_status.worker_refresh_interval_ms }}"
+>
+    {% if effective_readiness_state in ["worker_starting", "redis_starting", "install_running"] %}
+    <div
+        hx-get="/partials/stress-testing/status"
+        hx-trigger="every 2s"
+        hx-target="#bottom-panel"
+        hx-swap="innerHTML"
+        style="display:none"
+    ></div>
+    {% endif %}
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Stress Testing</h2>
+                <p>Queue real scenario reruns to stress-test your strategy under changed market conditions.</p>
+            </div>
+        </div>
+
+        {% if queue_message %}
+        <div class="terminal-inline-notice">{{ queue_message }}</div>
+        {% endif %}
+    </article>
+
+    {% if not can_queue_scenario %}
+    <article class="terminal-panel">
+        <div class="terminal-inline-notice">{{ queue_block_reason }}</div>
+    </article>
+
+    {% elif not queue_status.ready_to_queue %}
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Setup</h2>
+                <p>Complete these steps once to enable stress test queueing.</p>
+            </div>
+        </div>
+
+        <div class="metric-grid metric-grid--compact">
+            <div class="metric-card">
+                <span class="metric-card__label">1. Python Deps</span>
+                <span class="metric-card__value">
+                    {% if queue_status.rq_installed and queue_status.redis_installed %}
+                    Ready
+                    {% elif install_state.status == "running" %}
+                    Installing...
+                    {% elif install_state.status == "success" %}
+                    Installed
+                    {% else %}
+                    Missing
+                    {% endif %}
+                </span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">2. Redis</span>
+                <span class="metric-card__value">
+                    {% if queue_status.redis_reachable %}
+                    Live
+                    {% elif effective_readiness_state == "redis_starting" %}
+                    Starting...
+                    {% elif queue_status.redis_manager.state == "error" %}
+                    Error
+                    {% else %}
+                    Offline
+                    {% endif %}
+                </span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">3. Worker</span>
+                <span class="metric-card__value">{{ queue_status.worker.state | replace("_", " ") | title }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Queue</span>
+                <span class="metric-card__value">{{ "Ready" if queue_status.ready_to_queue else "Blocked" }}</span>
+            </div>
+        </div>
+
+        {% if queue_status.readiness_state == "missing_dependencies" %}
+            {% if install_state.status == "running" %}
+            <div class="terminal-inline-notice">Installing packages, please wait...</div>
+            {% elif install_state.status == "failed" %}
+            <div class="terminal-inline-notice">Installation failed: {{ install_state.error }}</div>
+            <form class="terminal-panel__stack" hx-post="/partials/deps/install" hx-target="#bottom-panel" hx-swap="innerHTML">
+                <button class="terminal-button" type="submit">Retry Install Packages</button>
+            </form>
+            {% elif install_state.status == "success" %}
+            <div class="terminal-inline-notice">Packages installed successfully. Checking readiness...</div>
+            {% else %}
+            <div class="terminal-inline-notice">Missing packages: {{ queue_status.missing_packages | join(", ") }}</div>
+            <form class="terminal-panel__stack" hx-post="/partials/deps/install" hx-target="#bottom-panel" hx-swap="innerHTML">
+                <button class="terminal-button" type="submit">Install Packages</button>
+            </form>
+            {% endif %}
+
+        {% elif queue_status.readiness_state == "backend_not_configured" %}
+        <div class="terminal-inline-notice">{{ queue_status.readiness_message }}</div>
+
+        {% elif effective_readiness_state == "redis_starting" %}
+        <div class="terminal-inline-notice">Redis is starting. The panel will refresh automatically.</div>
+
+        {% elif queue_status.can_start_redis %}
+        <div class="terminal-inline-notice">
+            {{ queue_status.readiness_message }}
+        </div>
+        {% if queue_status.redis_manager.last_error %}
+        <div class="terminal-inline-notice">{{ queue_status.redis_manager.last_error }}</div>
+        {% endif %}
+        <form class="terminal-panel__stack" hx-post="/partials/redis/start" hx-target="#bottom-panel" hx-swap="innerHTML">
+            <button class="terminal-button" type="submit">
+                {% if queue_status.redis_manager.state == "error" %}Retry Start Redis{% else %}Start Redis{% endif %}
+            </button>
+        </form>
+
+        {% elif queue_status.readiness_state == "backend_unreachable" %}
+        <div class="terminal-inline-notice">{{ queue_status.readiness_message }}</div>
+
+        {% elif queue_status.can_start_worker %}
+        {% if queue_status.worker.last_error %}
+        <div class="terminal-inline-notice">{{ queue_status.worker.last_error }}</div>
+        {% endif %}
+        <div class="terminal-inline-notice">One click starts a local worker for this dashboard session.</div>
+        <form
+            class="terminal-panel__stack"
+            hx-post="/partials/worker/start"
+            hx-target="#bottom-panel"
+            hx-include="#dashboard-filters"
+            hx-swap="innerHTML"
+        >
+            <button class="terminal-button" type="submit">
+                {% if queue_status.worker.state == "crashed" %}Restart Local Worker{% else %}Start Local Worker{% endif %}
+            </button>
+        </form>
+
+        {% elif effective_readiness_state == "worker_starting" %}
+        <div class="terminal-inline-notice">Local worker is starting. The panel will refresh automatically.</div>
+
+        {% else %}
+        <div class="terminal-inline-notice">{{ queue_status.readiness_message }}</div>
+        {% endif %}
+
+    </article>
+
+    {% else %}
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Launcher</h2>
+                <p>Queue a scenario rerun against the active portfolio baseline.</p>
+            </div>
+        </div>
+
+        <div class="metric-grid metric-grid--compact">
+            <div class="metric-card">
+                <span class="metric-card__label">Baseline Run</span>
+                <span class="metric-card__value">{{ baseline_run_id or "Unavailable" }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Volatility x</span>
+                <span class="metric-card__value">{{ "%.1f"|format(launch_stress.volatility) }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Slippage x</span>
+                <span class="metric-card__value">{{ "%.1f"|format(launch_stress.slippage) }}</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-card__label">Commission x</span>
+                <span class="metric-card__value">{{ "%.1f"|format(launch_stress.commission) }}</span>
+            </div>
+        </div>
+
+        <form
+            class="terminal-panel__stack"
+            hx-post="/partials/queue-scenario"
+            hx-target="#bottom-panel"
+            hx-include="#dashboard-filters"
+            hx-swap="innerHTML"
+        >
+            <label class="terminal-field">
+                <span>Scenario Family</span>
+                <select name="launch_family">
+                    {% for family in available_launch_families %}
+                    <option value="{{ family.value }}">{{ family.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="terminal-inline-notice">Uses the current sidebar stress controls as the scenario parameters.</div>
+            <button class="terminal-button" type="submit">Queue Stress Test</button>
+        </form>
+
+    </article>
+    {% endif %}
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Active Jobs</h2>
+                <p>Queued and running jobs stream live progress per card.</p>
+            </div>
+        </div>
+
+        {% if active_jobs %}
+        <div class="terminal-job-grid">
+            {% for job in active_jobs %}
+            {% include "components/job_card.html" %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="terminal-empty-state">No queued or running stress jobs right now.</div>
+        {% endif %}
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Recent Results</h2>
+                <p>Finished jobs stay visible for artifact inspection.</p>
+            </div>
+        </div>
+
+        {% if recent_jobs %}
+        <div class="terminal-table-wrap">
+            <table class="terminal-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Status</th>
+                        <th>Stage</th>
+                        <th>Created</th>
+                        <th>Output</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in recent_jobs %}
+                    <tr>
+                        <td>{{ job.job_id }}</td>
+                        <td>{{ job.status }}</td>
+                        <td>{{ job.progress_stage_label or "N/A" }}</td>
+                        <td>{{ job.created_at }}</td>
+                        <td>{{ job.output_artifact_path or "Pending" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="terminal-empty-state">No finalized stress-testing jobs yet.</div>
+        {% endif %}
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Available Now</h2>
+                <p>Currently queueable scenario families.</p>
+            </div>
+        </div>
+
+        <ul class="terminal-list">
+            {% for family in available_launch_families %}
+            <li><strong>{{ family.label }}</strong>: {{ family.description }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Coming Soon</h2>
+                <p>Future scenario families shown here to distinguish today's capabilities from the roadmap.</p>
+            </div>
+        </div>
+
+        <ul class="terminal-list">
+            {% for family in future_launch_families %}
+            <li><strong>{{ family.label }}</strong>: {{ family.description }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    {% if simulation_backlog %}
+    <article class="terminal-panel">
+        <div class="terminal-panel__header">
+            <div>
+                <h2>Simulation Backlog</h2>
+                <p>Simulation families reserved until dedicated execution paths are wired.</p>
+            </div>
+        </div>
+
+        <ul class="terminal-list">
+            {% for item in simulation_backlog %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+    {% endif %}
+</section>

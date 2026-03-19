@@ -33,8 +33,8 @@ class BacktestSettings(BaseSettings):
     cache_dir: Path = Field(default=Path("data/cache"), description="Parquet cache location")
     results_dir: Path = Field(default=Path("results"), description="Output directory for reports")
     terminal_redis_url: Optional[str] = Field(
-        default=None,
-        description="Optional Redis URL used by terminal job queueing and cache services.",
+        default="redis://127.0.0.1:6379/0",
+        description="Redis URL for terminal job queueing. Defaults to local Redis on port 6379.",
     )
     terminal_queue_name: str = Field(
         default="terminal-scenarios",
@@ -104,7 +104,7 @@ class BacktestSettings(BaseSettings):
     ib_use_rth: bool = False
     # ── Cache Management ───────────────────────────────────────────────────────
     max_cache_staleness_days: int = Field(
-        default=5,
+        default=10,
         description="Maximum allowed cache age in days for backtest runs.",
     )
 
@@ -114,6 +114,9 @@ class BacktestSettings(BaseSettings):
 
     # ── Terminal / analytics UI settings ────────────────────────────────────
     terminal_ui: "TerminalUISettings" = Field(default_factory=lambda: TerminalUISettings())
+    scenario_engine: "ScenarioEngineSettings" = Field(
+        default_factory=lambda: ScenarioEngineSettings()
+    )
 
     @property
     def dashboard(self) -> "TerminalUISettings":
@@ -286,6 +289,14 @@ class TerminalUISettings(BaseModel):
         default=2.0,
         description="Maximum SSE update frequency for terminal job progress streams.",
     )
+    terminal_worker_start_grace_seconds: float = Field(
+        default=2.0,
+        description="Grace period used before a newly spawned managed worker is treated as fully running.",
+    )
+    terminal_worker_stop_timeout_seconds: float = Field(
+        default=2.0,
+        description="Timeout in seconds when stopping the managed local worker process.",
+    )
 
     # ── 7. Terminal UI Theme ────────────────────────────────────────────────
     terminal_benchmark_color: str = Field(
@@ -347,4 +358,48 @@ class TerminalUISettings(BaseModel):
     terminal_loading_eta_per_request_seconds: float = Field(
         default=2.2,
         description="Fallback ETA estimate (seconds) per pending chart request.",
+    )
+
+
+class ScenarioEngineSettings(BaseModel):
+    """
+    Settings for the backend scenario foundation.
+
+    Methodology:
+        Scenario execution contracts, replay defaults, and retention knobs live
+        here so the foundation does not accumulate hidden constants across
+        worker, runner, and manifest code.
+    """
+
+    scenario_contract_version: str = Field(
+        default="scenario-spec.v1",
+        description="Version tag written into typed scenario contracts and job metadata.",
+    )
+    scenario_artifact_version: str = Field(
+        default="1.0",
+        description="Manifest version for scenario and simulation artifact contracts.",
+    )
+    default_replay_window_days: int = Field(
+        default=63,
+        description="Default replay window length in calendar days when a manual window is not supplied.",
+    )
+    max_candidate_replay_windows: int = Field(
+        default=12,
+        description="Upper bound reserved for future replay-window ranking candidates.",
+    )
+    queue_retention_days: int = Field(
+        default=14,
+        description="Default retention policy for durable file-backed scenario job metadata.",
+    )
+    simulation_seed_default: int = Field(
+        default=42,
+        description="Default seed reserved for future simulation-family execution.",
+    )
+    artifact_retention_days: int = Field(
+        default=30,
+        description="Default retention horizon for scenario and simulation artifacts.",
+    )
+    default_latency_ms: int = Field(
+        default=0,
+        description="Execution latency placeholder for Plan A scenario contracts.",
     )

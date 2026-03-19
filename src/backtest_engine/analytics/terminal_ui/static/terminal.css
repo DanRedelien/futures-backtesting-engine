@@ -613,6 +613,12 @@ body {
     background: #0D0D0D;
 }
 
+.terminal-job-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
 .terminal-job-card__row {
     display: flex;
     justify-content: space-between;
@@ -733,6 +739,7 @@ body {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .terminal-job-grid,
     .terminal-split--equal {
         grid-template-columns: 1fr;
     }

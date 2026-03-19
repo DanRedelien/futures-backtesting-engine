@@ -63,7 +63,7 @@ def build_shell_context(
 
     artifact_metadata = bundle.artifact_metadata
     scenario_notice = (
-        "Queue async scenario reruns from Operations. Simulation Analysis stays backlog-only."
+        "Risk stays approximation-only. Use Stress Testing for queued real reruns and saved scenario artifacts."
         if is_portfolio
         else "Single-asset mode reuses the same shell and hides portfolio-only panels."
     )

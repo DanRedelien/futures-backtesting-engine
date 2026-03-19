@@ -144,7 +144,7 @@ def _build_risk_panel_context_uncached(
         "stress_rows": stress_rows,
         "scenario_notice": (
             "Warning: Approximation only; does not change trade logic. "
-            "Use Operations for full stress tests."
+            "Use Stress Testing for full queued reruns."
             if bundle.run_type == "portfolio"
             else ""
         ),

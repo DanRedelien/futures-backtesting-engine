@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -47,6 +48,102 @@ def _compute_data_version(
         if cache_file.exists():
             digest.update(f"{symbol}:{timeframe}:{cache_file.stat().st_mtime_ns}".encode("utf-8"))
     return digest.hexdigest()[:_DATA_VERSION_DIGEST_LENGTH]
+
+
+def _parse_scenario_params_payload(
+    scenario_params_json: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    Parses the optional scenario payload passed through the CLI boundary.
+
+    Methodology:
+        The CLI accepts a JSON string because the child backtest process is
+        launched through subprocess. The payload is normalized here once so the
+        engine and manifest logic can consume a consistent dictionary shape.
+    """
+
+    if not scenario_params_json:
+        return None
+    try:
+        parsed = json.loads(scenario_params_json)
+    except json.JSONDecodeError as exc:
+        print(f"[Portfolio] Invalid scenario params JSON: {exc}")
+        sys.exit(1)
+    return parsed if isinstance(parsed, dict) else {"payload": parsed}
+
+
+def _parse_optional_datetime(raw_value: Any) -> Optional[datetime]:
+    """Parses one optional ISO timestamp used by replay-window filters."""
+
+    if raw_value in (None, ""):
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def _resolve_replay_window_filters(
+    scenario_params: Optional[Dict[str, Any]],
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """
+    Resolves engine date filters from the typed scenario payload.
+
+    Methodology:
+        Replay windows are expressed in the scenario contract rather than hidden
+        inside YAML so scenario preparation can restrict the engine input span
+        without changing the public CLI flags in Plan A.
+    """
+
+    if not scenario_params:
+        return None, None
+    replay_window = None
+    artifact_manifest = scenario_params.get("artifact_manifest")
+    if isinstance(artifact_manifest, dict):
+        selection_metadata = artifact_manifest.get("selection_metadata")
+        if isinstance(selection_metadata, dict):
+            replay_window = selection_metadata.get("replay_window")
+    if replay_window is None:
+        scenario_spec = scenario_params.get("scenario_spec")
+        if isinstance(scenario_spec, dict):
+            replay_window = scenario_spec.get("replay_window")
+    if not isinstance(replay_window, dict):
+        return None, None
+    date_range = replay_window.get("date_range")
+    if not isinstance(date_range, dict):
+        return None, None
+    return (
+        _parse_optional_datetime(date_range.get("start")),
+        _parse_optional_datetime(date_range.get("end")),
+    )
+
+
+def _merge_scenario_manifest_metadata(
+    manifest_metadata: Dict[str, Any],
+    scenario_params: Optional[Dict[str, Any]],
+) -> None:
+    """Promotes normalized scenario manifest fields into the saved portfolio manifest."""
+
+    if not scenario_params:
+        return
+    artifact_manifest = scenario_params.get("artifact_manifest")
+    if not isinstance(artifact_manifest, dict):
+        return
+    for field_name in (
+        "artifact_family",
+        "artifact_version",
+        "job_type",
+        "scenario_family",
+        "simulation_family",
+        "baseline_reference",
+        "input_contract",
+        "execution_contract",
+        "reproducibility",
+        "selection_metadata",
+    ):
+        value = artifact_manifest.get(field_name)
+        if value is not None:
+            manifest_metadata[field_name] = value
 
 
 def run(
@@ -95,6 +192,8 @@ def run(
 
     portfolio_cfg = raw.get("portfolio", {})
     settings = BacktestSettings()
+    scenario_params = _parse_scenario_params_payload(scenario_params_json)
+    start_date, end_date = _resolve_replay_window_filters(scenario_params)
 
     slots = []
     for slot_cfg in raw["strategies"]:
@@ -146,17 +245,13 @@ def run(
         sys.exit(1)
 
     data_version = _compute_data_version(data_lake=data_lake, requirements=requirements)
-    engine = PortfolioBacktestEngine(config, settings=settings)
+    engine = PortfolioBacktestEngine(
+        config,
+        settings=settings,
+        start_date=start_date,
+        end_date=end_date,
+    )
     engine.run()
-
-    scenario_params: Optional[Dict[str, Any]] = None
-    if scenario_params_json:
-        try:
-            parsed = json.loads(scenario_params_json)
-            scenario_params = parsed if isinstance(parsed, dict) else {"payload": parsed}
-        except json.JSONDecodeError as exc:
-            print(f"[Portfolio] Invalid scenario params JSON: {exc}")
-            sys.exit(1)
 
     output_dir: Optional[Path] = None
     if results_subdir:
@@ -181,6 +276,7 @@ def run(
         manifest_metadata["scenario_type"] = scenario_type
     if scenario_params is not None:
         manifest_metadata["scenario_params"] = scenario_params
+    _merge_scenario_manifest_metadata(manifest_metadata=manifest_metadata, scenario_params=scenario_params)
 
     # Load benchmark price series for reporting and analytics views.
     benchmark_data = None

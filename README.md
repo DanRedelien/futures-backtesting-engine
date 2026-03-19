@@ -18,6 +18,32 @@ python run.py --portfolio-backtest --dashboard   # run a backtest and open the d
 
 > Python 3.11+ recommended. No manual `PYTHONPATH` export needed — `pyproject.toml` configures it automatically for pytest, and `run.py` is always launched from the repo root.
 
+## Prerequisites: Redis (for Stress Testing)
+
+The Stress Testing tab queues scenario reruns through Redis/RQ. Redis is **not** installed by `pip install -r requirements.txt` — it is a separate system binary.
+
+**Windows** — install once via winget, then restart your terminal:
+
+```bash
+winget install Redis.Redis
+```
+
+**macOS:**
+
+```bash
+brew install redis
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt install redis-server
+```
+
+Once installed, `redis-server` will be available in PATH. The dashboard's Stress Testing tab has a **Start Redis** button that launches it automatically — no manual startup required.
+
+> If you skip this step, the dashboard still works for all analytics tabs. Only the Stress Testing queue will show "Offline" until Redis is started.
+
 ## Problem Statement
 
 Standard backtesting frameworks frequently suffer from data leakage during parameter optimization and hidden look-ahead bias when generating trading signals. This inevitably leads to in-sample (IS) curve fitting and catastrophic drawdowns in live trading.

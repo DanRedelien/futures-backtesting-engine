@@ -12,7 +12,6 @@ ARTIFACT_SCHEMA_VERSION = "1.1"
 DEFAULT_ENGINE_VERSION = "workspace"
 RERUN_REQUIRED_FIELDS = (
     "source_config_path",
-    "run_seed",
     "config_hash",
     "data_version",
 )

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from src.backtest_engine.analytics.dashboard.core.scenario_runner import get_baseline_run_id
 from src.backtest_engine.analytics.dashboard.risk_analysis.models import StressMultipliers
 from src.backtest_engine.analytics.terminal_ui.jobs import (
     FINAL_SCENARIO_JOB_STATES,
@@ -15,6 +20,8 @@ from src.backtest_engine.analytics.terminal_ui.jobs import (
     ScenarioJobService,
 )
 from src.backtest_engine.analytics.terminal_ui.service import TerminalRuntimeContext
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _read_simulation_backlog(todo_path: Path) -> list[str]:
@@ -39,19 +46,67 @@ def _read_simulation_backlog(todo_path: Path) -> list[str]:
     return items
 
 
-def _select_active_job(
-    jobs: list[ScenarioJobMetadata],
-    selected_job_id: Optional[str],
-) -> Optional[ScenarioJobMetadata]:
-    """Chooses the active job card shown in the operations panel."""
-    if selected_job_id:
-        for job in jobs:
-            if job.job_id == selected_job_id:
-                return job
-    for job in jobs:
-        if job.status in {"queued", "running"}:
-            return job
-    return jobs[0] if jobs else None
+def _split_jobs(jobs: list[ScenarioJobMetadata]) -> tuple[list[ScenarioJobMetadata], list[ScenarioJobMetadata]]:
+    """Splits jobs into active and recent-finalized collections for panel rendering."""
+
+    active_jobs = [job for job in jobs if job.status in {"queued", "running"}]
+    recent_jobs = [job for job in jobs if job.status not in {"queued", "running"}]
+    return active_jobs, recent_jobs
+
+
+def _available_launch_families() -> list[dict[str, str]]:
+    """Returns the currently queueable scenario families for the Stress Testing tab."""
+
+    return [
+        {
+            "value": "execution_shock",
+            "label": "Execution Shock",
+            "description": "Available now. Re-runs the strategy with changed volatility, spread, and commission assumptions.",
+        }
+    ]
+
+
+def _future_launch_families() -> list[dict[str, str]]:
+    """Returns future scenario families not yet available in the public queue surface."""
+
+    return [
+        {
+            "label": "Market Replay",
+            "description": "Reserved for historical replay windows after the replay-family launch path is wired.",
+        },
+        {
+            "label": "Tail Event Rerun",
+            "description": "Reserved for explicit tail-event injections after the dedicated execution path exists.",
+        },
+        {
+            "label": "Simulation Analysis",
+            "description": "Simulation families remain reserved until later roadmap phases.",
+        },
+    ]
+
+
+def _render_jobs_panel_template(
+    templates: Any,
+    request: Request,
+    *,
+    panel_name: str,
+    context: Dict[str, Any],
+) -> HTMLResponse:
+    """Renders either the stress-testing or operations panel with shared job context."""
+
+    template_name = (
+        "partials/panel_stress_testing.html"
+        if panel_name == "stress-testing"
+        else "partials/panel_operations.html"
+    )
+    return templates.TemplateResponse(
+        request,
+        template_name,
+        {
+            "request": request,
+            **context,
+        },
+    )
 
 
 def make_operations_context_builder(
@@ -64,11 +119,11 @@ def make_operations_context_builder(
     def _build_operations_context(
         bundle: Any,
         *,
-        selected_job_id: Optional[str] = None,
+        launch_stress: Optional[StressMultipliers] = None,
         queue_message: str = "",
     ) -> Dict[str, Any]:
         jobs = job_service.list_jobs(limit=20)
-        active_job = _select_active_job(jobs, selected_job_id)
+        active_jobs, recent_jobs = _split_jobs(jobs)
         compatibility = getattr(bundle, "compatibility", None)
         can_queue_scenario = (
             bundle.run_type == "portfolio"
@@ -81,14 +136,34 @@ def make_operations_context_builder(
         else:
             queue_block_reason = ""
 
+        resolved_stress = launch_stress or StressMultipliers(
+            volatility=1.0,
+            slippage=1.0,
+            commission=1.0,
+        )
         return {
             "queue_status": job_service.queue_status(),
             "jobs": [job.to_public_dict() for job in jobs],
-            "active_job": active_job.to_public_dict() if active_job is not None else None,
-            "selected_job_id": active_job.job_id if active_job is not None else "",
+            "active_jobs": [job.to_public_dict() for job in active_jobs],
+            "recent_jobs": [job.to_public_dict() for job in recent_jobs[:10]],
             "can_queue_scenario": can_queue_scenario,
             "queue_block_reason": queue_block_reason,
             "queue_message": queue_message,
+            "baseline_run_id": get_baseline_run_id(bundle) if bundle.run_type == "portfolio" else "",
+            "launch_stress": {
+                "volatility": float(resolved_stress.volatility),
+                "slippage": float(resolved_stress.slippage),
+                "commission": float(resolved_stress.commission),
+            },
+            "available_launch_families": _available_launch_families(),
+            "future_launch_families": _future_launch_families(),
+            "install_state": {"status": "idle", "output": "", "error": "", "started_at": ""},
+            "risk_vs_stress_notice": (
+                "Risk stays approximation-only. Stress Testing queues a child backtest and writes saved scenario artifacts."
+            ),
+            "operations_notice": (
+                "Launch new reruns from Stress Testing. Operations remains the diagnostic view for queue state and job history."
+            ),
             "simulation_backlog": _read_simulation_backlog(todo_path),
         }
 
@@ -108,15 +183,25 @@ def register_operations_routes(
 ) -> None:
     """Registers job queue, SSE, and operations form routes."""
 
-    @app.post("/partials/queue-scenario", response_class=HTMLResponse)
-    async def queue_scenario(request: Request) -> HTMLResponse:
-        """Queues one async scenario rerun and re-renders operations."""
-        bundle, error_response = load_bundle_for_partial()
-        if error_response is not None:
-            return error_response
+    install_state: Dict[str, Any] = {"status": "idle", "output": "", "error": "", "started_at": ""}
+    install_lock = threading.Lock()
 
+    def _build_stress_context(
+        bundle: Any,
+        *,
+        launch_stress: Optional[StressMultipliers] = None,
+        queue_message: str = "",
+    ) -> Dict[str, Any]:
+        """Builds the stress panel context, injecting the current install state."""
+        ctx = build_operations_context(bundle, launch_stress=launch_stress, queue_message=queue_message)
+        with install_lock:
+            ctx["install_state"] = dict(install_state)
+        return ctx
+
+    async def _resolve_launch_stress(request: Request) -> StressMultipliers:
+        """Reads launch stress controls from one form submission."""
         form = await request.form()
-        stress = StressMultipliers(
+        return StressMultipliers(
             volatility=coerce_float(
                 str(form.get("stress_volatility", "")),
                 runtime.risk_config.stress_defaults.volatility,
@@ -131,17 +216,164 @@ def register_operations_routes(
             ),
         )
 
+    @app.get("/partials/stress-testing/status", response_class=HTMLResponse)
+    async def stress_testing_status(request: Request) -> HTMLResponse:
+        """Re-renders the Stress Testing panel for polling-based auto-refresh."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+        context = _build_stress_context(bundle)
+        return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
+
+    @app.post("/partials/deps/install", response_class=HTMLResponse)
+    async def deps_install(request: Request) -> HTMLResponse:
+        """Runs pip install in a background thread and re-renders the Stress Testing panel."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+
+        with install_lock:
+            if install_state["status"] == "running":
+                context = _build_stress_context(bundle, queue_message="Package installation is already in progress.")
+                return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
+            install_state["status"] = "running"
+            install_state["output"] = ""
+            install_state["error"] = ""
+            install_state["started_at"] = datetime.now(timezone.utc).isoformat()
+
+        def _run_install() -> None:
+            requirements_path = str(_PROJECT_ROOT / "requirements.txt")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-r", requirements_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                with install_lock:
+                    if result.returncode == 0:
+                        install_state["status"] = "success"
+                        install_state["output"] = (result.stdout or "")[-800:].strip()
+                    else:
+                        install_state["status"] = "failed"
+                        install_state["error"] = (result.stderr or result.stdout or "")[-800:].strip()
+            except Exception as exc:
+                with install_lock:
+                    install_state["status"] = "failed"
+                    install_state["error"] = str(exc)
+
+        threading.Thread(target=_run_install, daemon=True).start()
+        context = _build_stress_context(bundle, queue_message="Installing packages. This may take a moment.")
+        return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
+
+    @app.post("/partials/redis/start", response_class=HTMLResponse)
+    async def redis_start(request: Request) -> HTMLResponse:
+        """Starts the managed local redis-server and re-renders the Stress Testing panel."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+        queue_message = ""
+        try:
+            snap = job_service.start_managed_redis()
+            state = str(snap.get("state", "stopped"))
+            if state == "live":
+                queue_message = "Redis is live. Start the local worker to begin stress testing."
+            elif state == "starting":
+                queue_message = "Redis is starting. The panel will refresh automatically."
+            else:
+                queue_message = snap.get("last_error", "") or "Redis could not start."
+        except RuntimeError as exc:
+            queue_message = str(exc)
+        context = _build_stress_context(bundle, queue_message=queue_message)
+        return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
+
+    @app.post("/partials/redis/stop", response_class=HTMLResponse)
+    async def redis_stop(request: Request) -> HTMLResponse:
+        """Stops the managed local redis-server and re-renders the Stress Testing panel."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+        queue_message = ""
+        try:
+            job_service.stop_managed_redis()
+            queue_message = "Redis stopped."
+        except RuntimeError as exc:
+            queue_message = str(exc)
+        context = _build_stress_context(bundle, queue_message=queue_message)
+        return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
+
+    @app.post("/partials/worker/start", response_class=HTMLResponse)
+    async def start_worker(request: Request) -> HTMLResponse:
+        """Starts the managed local worker and re-renders the Stress Testing panel."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+
+        stress = await _resolve_launch_stress(request)
+        try:
+            worker_snapshot = job_service.start_managed_worker()
+            state = str(worker_snapshot.get("state", "stopped"))
+            queue_message = (
+                "Local worker is starting. The panel will refresh automatically."
+                if state == "starting"
+                else "Local worker is running. You can queue a stress test now."
+            )
+        except RuntimeError as exc:
+            queue_message = str(exc)
+        context = _build_stress_context(
+            bundle,
+            launch_stress=stress,
+            queue_message=queue_message,
+        )
+        return _render_jobs_panel_template(
+            templates,
+            request,
+            panel_name="stress-testing",
+            context=context,
+        )
+
+    @app.post("/partials/queue-scenario", response_class=HTMLResponse)
+    async def queue_scenario(request: Request) -> HTMLResponse:
+        """Queues one async scenario rerun and re-renders the Stress Testing panel."""
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+
+        form = await request.form()
+        launch_family = str(form.get("launch_family", "execution_shock")).strip() or "execution_shock"
+        stress = await _resolve_launch_stress(request)
+        queue_status = job_service.queue_status()
+
         if bundle.run_type != "portfolio":
-            context = build_operations_context(
+            context = _build_stress_context(
                 bundle,
+                launch_stress=stress,
                 queue_message="Scenario reruns are only available for portfolio artifacts.",
             )
         else:
             compatibility = bundle.compatibility
             if compatibility is not None and not compatibility.is_rerunnable:
-                context = build_operations_context(
+                context = _build_stress_context(
                     bundle,
+                    launch_stress=stress,
                     queue_message=compatibility.reason or "This artifact is view-only and cannot be rerun.",
+                )
+            elif not bool(queue_status.get("ready_to_queue")):
+                context = _build_stress_context(
+                    bundle,
+                    launch_stress=stress,
+                    queue_message=str(
+                        queue_status.get(
+                            "readiness_message",
+                            "Stress Testing is not ready to queue a rerun yet.",
+                        )
+                    ),
+                )
+            elif launch_family != "execution_shock":
+                context = _build_stress_context(
+                    bundle,
+                    launch_stress=stress,
+                    queue_message=f"`{launch_family}` is not available yet. Only execution-shock reruns can be queued.",
                 )
             else:
                 job = job_service.enqueue_portfolio_scenario(
@@ -154,20 +386,28 @@ def register_operations_routes(
                     if job.status == "queued"
                     else "Scenario job could not be queued because Redis or RQ is unavailable."
                 )
-                context = build_operations_context(
+                context = _build_stress_context(
                     bundle,
-                    selected_job_id=job.job_id,
+                    launch_stress=stress,
                     queue_message=queue_message,
                 )
 
-        return templates.TemplateResponse(
+        return _render_jobs_panel_template(
+            templates,
             request,
-            "partials/panel_operations.html",
-            {
-                "request": request,
-                **context,
-            },
+            panel_name="stress-testing",
+            context=context,
         )
+
+    @app.post("/api/jobs/{job_id}/cancel", response_class=HTMLResponse)
+    async def cancel_job(request: Request, job_id: str) -> HTMLResponse:
+        """Cancels a queued or running job and re-renders the Stress Testing panel."""
+        job_service.cancel_job(job_id)
+        bundle, error_response = load_bundle_for_partial()
+        if error_response is not None:
+            return error_response
+        context = _build_stress_context(bundle)
+        return _render_jobs_panel_template(templates, request, panel_name="stress-testing", context=context)
 
     @app.get("/api/jobs", response_class=JSONResponse)
     def jobs_index() -> JSONResponse:

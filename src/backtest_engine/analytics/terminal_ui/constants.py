@@ -9,6 +9,7 @@ BASE_BOTTOM_TABS: tuple[dict[str, str], ...] = (
     {"id": "pnl-distribution", "label": "PnL Distribution"},
     {"id": "strategy-stats", "label": "Strategy Stats"},
     {"id": "risk", "label": "Risk"},
+    {"id": "stress-testing", "label": "Stress Testing"},
     {"id": "exit-analysis", "label": "Exit Analysis"},
     {"id": "operations", "label": "Operations"},
 )
