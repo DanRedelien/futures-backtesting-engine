@@ -1,3 +1,6 @@
+<img width="1552" height="714" alt="image" src="https://github.com/user-attachments/assets/7ab64b6d-f918-49e3-9a98-357332e647c6" />
+
+
 # Backtesting Platform
 
 A futures-focused backtesting platform for single-strategy research, portfolio backtests, walk-forward validation, and terminal-style analytics review.
