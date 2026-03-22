@@ -68,7 +68,7 @@ class SmaCrossoverConfig:
     trend_window: int = 100        # Window to measure trend strength
     trend_min_tstat: float = 1.4   # Minimum T-stat to enter (we only want real, meaningful crossovers)
 
-    trade_direction: str = "long"           # Allowed directions: "both", "long", "short"
+    trade_direction: str = "both"           # Allowed directions: "both", "long", "short"
 
 
 class SmaCrossoverStrategy(BaseStrategy):

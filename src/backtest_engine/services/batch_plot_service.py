@@ -10,11 +10,28 @@ Methodology:
 
 from __future__ import annotations
 
+import textwrap
 from typing import Sequence
 
 import numpy as np
 
 from src.backtest_engine.services.batch_models import SingleBatchResult, WfoBatchResult
+
+
+def _format_summary_scenario_label(result: SingleBatchResult) -> str:
+    """
+    Formats batch scenario labels for narrow summary tables.
+
+    Methodology:
+        The chart legend can keep the full one-line label, but the summary table
+        benefits from a stacked layout where the strategy ID is prominent and
+        symbol/timeframe metadata sit on a second line.
+    """
+    strategy_line = "\n".join(
+        textwrap.wrap(result.scenario.strategy_id, width=14, break_long_words=False)
+    )
+    meta_line = f"{result.scenario.symbol} | {result.scenario.timeframe}"
+    return f"{strategy_line}\n{meta_line}" if strategy_line else meta_line
 
 
 def show_single_batch_plot(
@@ -43,25 +60,55 @@ def show_single_batch_plot(
         gridspec_kw={"width_ratios": [3.7, 1.8]},
     )
 
+    plotted_lines = []
     for result in ordered_results:
-        chart_ax.plot(
+        (line,) = chart_ax.plot(
             result.timestamps,
             result.log_equity,
             linewidth=1.4,
             label=result.scenario.legend_label,
         )
+        plotted_lines.append(line)
 
     chart_ax.axhline(0.0, color="#7F7F7F", linewidth=0.9, linestyle="--")
     chart_ax.set_title("Batch Single-Strategy Log PnL")
     chart_ax.set_xlabel("Date")
     chart_ax.set_ylabel("log(total_value / initial_capital)")
     chart_ax.grid(alpha=0.2)
-    chart_ax.legend(loc="upper left", fontsize=8)
+    legend = chart_ax.legend(loc="upper left", fontsize=8)
+
+    legend_toggle_registry = {}
+    for plotted_line, legend_line, legend_text in zip(
+        plotted_lines,
+        legend.get_lines(),
+        legend.get_texts(),
+    ):
+        legend_line.set_picker(True)
+        legend_line.set_pickradius(8)
+        legend_text.set_picker(True)
+        legend_toggle_registry[legend_line] = (plotted_line, legend_line, legend_text)
+        legend_toggle_registry[legend_text] = (plotted_line, legend_line, legend_text)
+
+    def _handle_legend_pick(event: object) -> None:
+        artist = getattr(event, "artist", None)
+        target = legend_toggle_registry.get(artist)
+        if target is None:
+            return
+
+        plotted_line, legend_line, legend_text = target
+        is_visible = not plotted_line.get_visible()
+        plotted_line.set_visible(is_visible)
+        item_alpha = 1.0 if is_visible else 0.25
+        legend_line.set_alpha(item_alpha)
+        legend_text.set_alpha(item_alpha)
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("pick_event", _handle_legend_pick)
 
     table_ax.axis("off")
     table_rows = [
         [
-            result.scenario.legend_label,
+            _format_summary_scenario_label(result),
             f"{result.pnl_pct:+.2f}%",
             f"{result.max_drawdown_pct:.2f}%",
             f"{result.sharpe_ratio:.2f}",
@@ -74,10 +121,19 @@ def show_single_batch_plot(
         cellLoc="left",
         colLoc="left",
         loc="center",
+        colWidths=[0.50, 0.17, 0.17, 0.16],
     )
     table.auto_set_font_size(False)
     table.set_fontsize(8)
-    table.scale(1.0, 1.25)
+    table.scale(1.08, 1.75)
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        if row_idx == 0:
+            cell.set_text_props(weight="bold")
+        if col_idx == 0:
+            cell.get_text().set_wrap(True)
+            cell.get_text().set_ha("left")
+        else:
+            cell.get_text().set_ha("right")
     table_ax.set_title("Summary", pad=12)
 
     fig.tight_layout()

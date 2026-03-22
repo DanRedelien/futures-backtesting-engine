@@ -87,6 +87,42 @@ def _resolve_max_workers(
     return max(1, min(base_workers, scenario_count, cpu_count))
 
 
+def _build_capped_log_equity_curve(
+    total_values: Sequence[float],
+    initial_capital: float,
+    floor_pct: float,
+    ruin_equity_ratio: float,
+) -> np.ndarray:
+    """
+    Converts portfolio values into a log-equity curve capped at the loss floor.
+
+    Methodology:
+        Batch plots should remain readable even when a strategy drives account
+        equity below zero.  Once the account hits the configured floor, the
+        displayed curve is pinned to a fixed positive surrogate so the log axis
+        stays finite and other scenarios remain visible.
+
+    Args:
+        total_values: Portfolio total-value history.
+        initial_capital: Starting capital used for normalization.
+        floor_pct: Minimum allowed displayed total-return percentage.
+        ruin_equity_ratio: Positive surrogate ratio used for log plotting at the floor.
+
+    Returns:
+        Numpy array with log-equity values ready for plotting.
+    """
+    if initial_capital <= 0.0:
+        raise ValueError("initial_capital must be positive.")
+    if ruin_equity_ratio <= 0.0:
+        raise ValueError("ruin_equity_ratio must be positive for log plotting.")
+
+    total_value_array = np.asarray(total_values, dtype=float)
+    raw_return_ratio = (total_value_array / float(initial_capital)) - 1.0
+    capped_return_ratio = np.maximum(raw_return_ratio, floor_pct / 100.0)
+    display_equity_ratio = np.maximum(capped_return_ratio + 1.0, ruin_equity_ratio)
+    return np.log(display_equity_ratio)
+
+
 def _render_progress_bar(
     current: int,
     total: int,
@@ -156,17 +192,21 @@ def _run_batch_worker(
 
         metrics = engine.analytics.calculate_metrics(history, engine.execution.trades)
         total_values = history["total_value"].astype(float)
-        initial_capital = float(settings.initial_capital)
-        normalized_equity = np.clip(total_values / initial_capital, 1e-12, None)
-        log_equity = np.log(normalized_equity)
+        floor_pct = float(settings.batch_equity_floor_pct)
+        log_equity = _build_capped_log_equity_curve(
+            total_values=total_values.to_numpy(dtype=float),
+            initial_capital=float(settings.initial_capital),
+            floor_pct=floor_pct,
+            ruin_equity_ratio=float(settings.batch_plot_ruin_equity_ratio),
+        )
 
         return SingleBatchResult(
             scenario=scenario,
             status="completed",
             timestamps=history.index.to_list(),
-            log_equity=log_equity.to_list(),
-            pnl_pct=float(metrics.get("Total Return", 0.0) * 100.0),
-            max_drawdown_pct=float(metrics.get("Max Drawdown", 0.0) * 100.0),
+            log_equity=log_equity.tolist(),
+            pnl_pct=max(float(metrics.get("Total Return", 0.0) * 100.0), floor_pct),
+            max_drawdown_pct=max(float(metrics.get("Max Drawdown", 0.0) * 100.0), floor_pct),
             sharpe_ratio=float(metrics.get("Sharpe Ratio", 0.0)),
         )
     except Exception as exc:

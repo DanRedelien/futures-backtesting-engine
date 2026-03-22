@@ -36,49 +36,35 @@ strategies:
 
   - strategy: stat_level
     symbols:
-      - GC
-    weight: 0.10
+      - YM
+    weight: 0.20
     timeframe: 30m
     params: {}
 
-  - strategy: intraday_momentum
+  - strategy: sma
     symbols:
-      - ES
-    weight: 0.10
+      - YM
+    weight: 0.20
+    timeframe: 30m
+    params: {}
+
+  - strategy: sma
+    symbols:
+      - RTY
+    weight: 0.20
     timeframe: 30m
     params: {}
 
   - strategy: sma_pullback
     symbols:
-      - NQ
-    weight: 0.30
-    timeframe: 30m
-    params: {}
-
-  - strategy: zscore
-    symbols:
-      - CL
-    weight: 0.10
-    timeframe: 30m
-    params: {}
-
-  - strategy: ict_ob
-    symbols:
-      - GC
-    weight: 0.15
-    timeframe: 30m
-    params: {}
-
-  - strategy: mean_rev
-    symbols:
-      - GC
-    weight: 0.10
+      - YM
+    weight: 0.20
     timeframe: 30m
     params: {}
 
   - strategy: sma
     symbols:
       - GC
-    weight: 0.15
+    weight: 0.20
     timeframe: 30m
     params: {}
