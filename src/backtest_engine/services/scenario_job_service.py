@@ -2,24 +2,18 @@
 Framework-neutral scenario job queue service.
 
 Methodology:
-    Scenario job metadata, queue configuration, and the RQ worker entry
-    point live here so that the terminal_ui layer stays a thin HTTP shell.
-    Redis and RQ hold queue semantics, while file-backed metadata remains
-    the durable source for UI monitoring, SSE progress, and completed job
-    inspection even after Redis TTL or worker restarts.
+    Scenario job metadata, queue configuration, and the RQ-facing service
+    boundary live here so the terminal UI stays a thin HTTP shell. The module
+    remains the public import surface, while storage and worker concerns are
+    split into adjacent helpers to keep responsibilities local and testable.
 """
 
 from __future__ import annotations
 
 import importlib
-import json
-import subprocess
-import sys
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
-from uuid import uuid4
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 try:
     _redis_module = importlib.import_module("redis")
@@ -32,6 +26,7 @@ except Exception:  # pragma: no cover - optional dependency import safety
     class RedisError(Exception):
         """Fallback Redis error when the redis package is unavailable."""
 
+
 try:
     _rq_module = importlib.import_module("rq")
     Queue = _rq_module.Queue
@@ -40,33 +35,42 @@ except Exception:  # pragma: no cover - optional dependency import safety
     Queue = None  # type: ignore[assignment]
     Retry = None  # type: ignore[assignment]
 
-from src.backtest_engine.services.artifact_service import (
-    ResultBundle,
-    load_result_bundle_uncached,
+from src.backtest_engine.analytics.shared.risk_models import StressMultipliers
+from src.backtest_engine.analytics.scenario_engine import (
+    ScenarioSpec,
+    get_progress_stages,
 )
+from src.backtest_engine.services.artifact_service import ResultBundle
 from src.backtest_engine.services.paths import get_results_dir
 from src.backtest_engine.services.scenario_runner_service import (
     build_stress_scenario_spec,
     get_baseline_run_id,
-    run_portfolio_scenario,
 )
-from src.backtest_engine.analytics.shared.risk_models import StressMultipliers
-from src.backtest_engine.analytics.scenario_engine import (
-    ArtifactFamily,
-    JobType,
-    ProgressStageId,
-    ScenarioSpec,
-    build_progress_metadata,
-    get_progress_stages,
+
+from .scenario_job_models import (
+    FINAL_SCENARIO_JOB_STATES,
+    SUPPORTED_QUEUE_JOB_TYPES,
+    ScenarioJobMetadata,
+    ScenarioJobStatus,
+    TerminalQueueConfig,
+)
+from .scenario_job_readiness import (
+    build_readiness_summary,
+    build_redis_manager_snapshot,
+    build_worker_snapshot,
+    build_worker_start_command,
+)
+from .scenario_job_store import ScenarioJobStore
+from .scenario_job_worker import (
+    _scenario_job_id,
+    _update_job_metadata,
+    _update_job_stage,
+    _utc_now_iso,
+    run_portfolio_scenario_job,
 )
 
 if TYPE_CHECKING:
     from src.backtest_engine.services.worker_manager import LocalRedisManager, LocalWorkerManager
-
-
-ScenarioJobStatus = Literal["queued", "running", "completed", "failed", "timeout"]
-FINAL_SCENARIO_JOB_STATES = {"completed", "failed", "timeout"}
-SUPPORTED_QUEUE_JOB_TYPES: tuple[JobType, ...] = (JobType.STRESS_RERUN,)
 
 
 def _resolve_redis_bindings() -> tuple[Optional[type[Any]], type[Exception]]:
@@ -86,7 +90,7 @@ def _resolve_rq_bindings() -> tuple[Optional[type[Any]], Optional[type[Any]]]:
     Methodology:
         rq 2.x uses multiprocessing fork at import time, which is unavailable on
         Windows. Pin rq<2.0.0 in requirements.txt to avoid this failure.
-        Retry is optional — jobs queue correctly without it (no retry policy applied).
+        Retry is optional - jobs queue correctly without it (no retry policy applied).
     """
     try:
         rq_module = importlib.import_module("rq")
@@ -94,292 +98,6 @@ def _resolve_rq_bindings() -> tuple[Optional[type[Any]], Optional[type[Any]]]:
         return rq_module.Queue, retry_class
     except Exception:
         return None, None
-
-
-@dataclass(frozen=True)
-class TerminalQueueConfig:
-    """Execution policy for terminal-driven async scenario jobs."""
-
-    redis_url: Optional[str]
-    queue_name: str
-    timeout_seconds: int
-    max_retries: int
-    sse_max_updates_per_second: float
-    worker_start_grace_seconds: float = 2.0
-    worker_stop_timeout_seconds: float = 2.0
-
-
-@dataclass
-class ScenarioJobMetadata:
-    """Persistent metadata for one queued or completed scenario rerun."""
-
-    job_id: str
-    status: ScenarioJobStatus
-    created_at: str
-    baseline_results_dir: str
-    baseline_run_id: str
-    scenario_type: str
-    scenario_params: Dict[str, Any]
-    timeout_seconds: int
-    max_retries: int
-    failure_state: str
-    queue_name: str
-    job_type: str = JobType.STRESS_RERUN.value
-    scenario_family: str = ""
-    simulation_family: str = ""
-    artifact_family: str = ArtifactFamily.SCENARIOS.value
-    progress_stage_id: str = ""
-    progress_stage_label: str = ""
-    progress_stage_order: int = 0
-    progress_stage_count: int = 0
-    input_contract_version: str = ""
-    seed: Optional[int] = None
-    scenario_spec: Dict[str, Any] = field(default_factory=dict)
-    progress_current: int = 0
-    progress_total: int = 0
-    progress_message: str = ""
-    started_at: str = ""
-    completed_at: str = ""
-    duration_seconds: Optional[float] = None
-    output_artifact_path: str = ""
-    artifact_paths: List[str] = field(default_factory=list)
-    rq_job_id: str = ""
-    last_error: str = ""
-
-    def __post_init__(self) -> None:
-        """Backfills compatibility fields when loading older job metadata."""
-        if not self.job_type:
-            self.job_type = self.scenario_type or JobType.STRESS_RERUN.value
-        if not self.scenario_type:
-            self.scenario_type = self.job_type
-        if not self.artifact_family:
-            self.artifact_family = ArtifactFamily.SCENARIOS.value
-        if not self.progress_stage_count and self.progress_total:
-            self.progress_stage_count = int(self.progress_total)
-        if not self.progress_stage_order and self.progress_current:
-            self.progress_stage_order = int(self.progress_current)
-
-    def to_public_dict(self) -> Dict[str, Any]:
-        """Returns JSON-safe metadata for UI responses and SSE events."""
-        data = asdict(self)
-        total = max(0, int(self.progress_total))
-        current = max(0, int(self.progress_current))
-        data["progress_pct"] = (
-            round(current / total * 100.0, 1)
-            if total > 0
-            else 0.0
-        )
-        return data
-
-
-class ScenarioJobStore:
-    """File-backed metadata store for queued and completed scenario jobs."""
-
-    def __init__(self, results_dir: Optional[str] = None) -> None:
-        self.results_root = Path(results_dir) if results_dir is not None else get_results_dir()
-        self.jobs_dir = self.results_root / "jobs"
-        self.jobs_dir.mkdir(parents=True, exist_ok=True)
-
-    def _job_path(self, job_id: str) -> Path:
-        """Returns the metadata file path for one job identifier."""
-        return self.jobs_dir / f"{job_id}.json"
-
-    def save(self, metadata: ScenarioJobMetadata) -> ScenarioJobMetadata:
-        """Persists one job metadata record."""
-        path = self._job_path(metadata.job_id)
-        path.write_text(json.dumps(metadata.to_public_dict(), indent=2), encoding="utf-8")
-        return metadata
-
-    def get(self, job_id: str) -> Optional[ScenarioJobMetadata]:
-        """Loads one job metadata record by identifier."""
-        path = self._job_path(job_id)
-        if not path.exists():
-            return None
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return None
-        raw.pop("progress_pct", None)
-        return ScenarioJobMetadata(**raw)
-
-    def list(self, limit: int = 20) -> List[ScenarioJobMetadata]:
-        """Lists recent jobs newest-first."""
-        records: List[ScenarioJobMetadata] = []
-        for path in sorted(self.jobs_dir.glob("*.json"), reverse=True):
-            job = self.get(path.stem)
-            if job is not None:
-                records.append(job)
-            if len(records) >= limit:
-                break
-        records.sort(key=lambda item: item.created_at, reverse=True)
-        return records
-
-
-def _utc_now_iso() -> str:
-    """Returns the current UTC timestamp as an ISO string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _scenario_job_id() -> str:
-    """Builds a unique identifier for one async scenario job."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"scenario-job-{timestamp}-{uuid4().hex[:8]}"
-
-
-def _update_job_metadata(
-    store: ScenarioJobStore,
-    job_id: str,
-    **updates: Any,
-) -> Optional[ScenarioJobMetadata]:
-    """Loads, mutates, and persists one job record."""
-    metadata = store.get(job_id)
-    if metadata is None:
-        return None
-    for key, value in updates.items():
-        setattr(metadata, key, value)
-    return store.save(metadata)
-
-
-def _update_job_stage(
-    store: ScenarioJobStore,
-    job_id: str,
-    *,
-    job_type: str,
-    stage_id: ProgressStageId,
-    progress_message: str,
-    **updates: Any,
-) -> Optional[ScenarioJobMetadata]:
-    """Applies one normalized stage transition to the persisted job record."""
-
-    stage_updates = build_progress_metadata(job_type=job_type, stage_id=stage_id)
-    stage_updates["progress_message"] = progress_message
-    stage_updates.update(updates)
-    return _update_job_metadata(store, job_id, **stage_updates)
-
-
-def run_portfolio_scenario_job(
-    job_id: str,
-    baseline_results_dir: str,
-    scenario_spec_payload: Dict[str, Any],
-    timeout_seconds: int,
-) -> Dict[str, Any]:
-    """
-    Executes one queued scenario rerun inside an RQ worker process.
-
-    Methodology:
-        Workers always load the baseline bundle afresh from persisted artifacts,
-        update file-backed metadata before and after the expensive subprocess
-        step, and write final scenario outputs back to Parquet artifacts. Redis
-        holds queue state, while durable metadata remains in `results/jobs/`.
-    """
-    store = ScenarioJobStore(results_dir=baseline_results_dir)
-    scenario_spec = ScenarioSpec.model_validate(scenario_spec_payload)
-    started_at = _utc_now_iso()
-    _update_job_stage(
-        store,
-        job_id,
-        job_type=scenario_spec.job_type.value,
-        stage_id=ProgressStageId.LOAD_BASELINE,
-        progress_message="Loading baseline artifacts.",
-        status="running",
-        started_at=started_at,
-    )
-
-    try:
-        bundle = load_result_bundle_uncached(results_dir=baseline_results_dir)
-        if bundle is None or bundle.run_type != "portfolio":
-            raise ValueError("Baseline portfolio artifacts are unavailable for scenario rerun.")
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.BUILD_SCENARIO_INPUTS,
-            progress_message="Validating scenario contract.",
-        )
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.PREPARE_EXECUTION_MODEL,
-            progress_message="Preparing execution overrides.",
-        )
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.RUN_BACKTEST_OR_SIMULATION,
-            progress_message="Running child portfolio backtest.",
-        )
-        scenario_root = run_portfolio_scenario(
-            bundle=bundle,
-            scenario_spec=scenario_spec,
-            timeout_seconds=timeout_seconds,
-        )
-
-        completed_at = _utc_now_iso()
-        started_dt = datetime.fromisoformat(started_at)
-        completed_dt = datetime.fromisoformat(completed_at)
-        duration_seconds = (completed_dt - started_dt).total_seconds()
-        artifact_path = str((scenario_root / "portfolio").resolve())
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.COMPUTE_POST_METRICS,
-            progress_message="Collecting scenario output metadata.",
-            output_artifact_path=artifact_path,
-            artifact_paths=[artifact_path],
-        )
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.WRITE_ARTIFACTS,
-            progress_message="Writing final scenario manifests.",
-            output_artifact_path=artifact_path,
-            artifact_paths=[artifact_path],
-        )
-        _update_job_stage(
-            store,
-            job_id,
-            job_type=scenario_spec.job_type.value,
-            stage_id=ProgressStageId.FINALIZE_METADATA,
-            progress_message="Scenario artifacts completed.",
-            status="completed",
-            completed_at=completed_at,
-            duration_seconds=duration_seconds,
-            output_artifact_path=artifact_path,
-            artifact_paths=[artifact_path],
-        )
-        return {"job_id": job_id, "output_artifact_path": artifact_path}
-    except subprocess.TimeoutExpired as exc:
-        completed_at = _utc_now_iso()
-        started_dt = datetime.fromisoformat(started_at)
-        completed_dt = datetime.fromisoformat(completed_at)
-        _update_job_metadata(
-            store,
-            job_id,
-            status="timeout",
-            completed_at=completed_at,
-            duration_seconds=(completed_dt - started_dt).total_seconds(),
-            progress_message="Scenario rerun timed out.",
-            last_error=str(exc),
-        )
-        raise
-    except Exception as exc:
-        completed_at = _utc_now_iso()
-        started_dt = datetime.fromisoformat(started_at)
-        completed_dt = datetime.fromisoformat(completed_at)
-        _update_job_metadata(
-            store,
-            job_id,
-            status="failed",
-            completed_at=completed_at,
-            duration_seconds=(completed_dt - started_dt).total_seconds(),
-            progress_message="Scenario rerun failed.",
-            last_error=str(exc),
-        )
-        raise
 
 
 class ScenarioJobService:
@@ -419,15 +137,13 @@ class ScenarioJobService:
             return None
         return self._sync_job_status(metadata)
 
-    def cancel_job(self, job_id: str) -> Optional["ScenarioJobMetadata"]:
+    def cancel_job(self, job_id: str) -> Optional[ScenarioJobMetadata]:
         """
         Cancels a queued or running job.
 
         Attempts to remove the job from the Redis queue first, then marks
         the local metadata record as cancelled regardless of whether the
-        Redis-side cancellation succeeded (handles stale/orphaned jobs).
-
-        Returns the updated metadata, or None if the job does not exist.
+        Redis-side cancellation succeeded.
         """
         metadata = self.store.get(job_id)
         if metadata is None:
@@ -443,19 +159,10 @@ class ScenarioJobService:
             except Exception:
                 pass
 
-        metadata.status = "cancelled"
+        metadata.status = "cancelled"  # type: ignore[assignment]
         metadata.last_error = "Cancelled by user."
         self.store.save(metadata)
         return metadata
-
-    def _worker_start_command(self) -> str:
-        """Returns the expected RQ worker command for the configured terminal queue."""
-        if self.worker_manager is not None:
-            return self.worker_manager.snapshot().command
-        base_command = f'"{sys.executable}" -m rq worker'
-        if self.config.redis_url:
-            return f'{base_command} --url "{self.config.redis_url}" {self.config.queue_name}'
-        return f"{base_command} {self.config.queue_name}"
 
     def _module_readiness(self) -> Dict[str, Any]:
         """Returns Python dependency availability for the current queue backend."""
@@ -500,169 +207,14 @@ class ScenarioJobService:
             "redis_url": self.config.redis_url or "",
         }
 
-    def _worker_snapshot(self) -> Dict[str, Any]:
-        """Returns the managed-worker snapshot as a JSON-safe dictionary."""
-        if self.worker_manager is None:
-            return {
-                "state": "stopped",
-                "is_running": False,
-                "started_by_app": False,
-                "pid": None,
-                "started_at": "",
-                "exit_code": None,
-                "last_error": "",
-                "log_path": "",
-                "command": self._worker_start_command(),
-            }
-        return self.worker_manager.snapshot().to_public_dict()
-
-    def _redis_manager_snapshot(self) -> Dict[str, Any]:
-        """Returns the managed-redis snapshot as a JSON-safe dictionary."""
-        if self.redis_manager is None:
-            return {
-                "state": "stopped",
-                "is_live": False,
-                "started_by_app": False,
-                "pid": None,
-                "started_at": "",
-                "exit_code": None,
-                "last_error": "",
-                "log_path": "",
-                "host": "",
-                "port": 0,
-            }
-        return self.redis_manager.snapshot().to_public_dict()
-
-    def _missing_dependency_message(self, missing_packages: List[str]) -> str:
-        """Builds a human-readable message for missing Python dependencies."""
-        if not missing_packages:
-            return ""
-        if len(missing_packages) == 1:
-            return (
-                f"Background worker is unavailable because Python package "
-                f"{missing_packages[0]} is not installed in this environment."
-            )
-        packages = ", ".join(missing_packages)
-        return (
-            "Background worker is unavailable because these Python packages are "
-            f"missing from this environment: {packages}."
-        )
-
-    def _readiness_summary(
-        self,
-        dependencies: Dict[str, Any],
-        backend: Dict[str, Any],
-        worker: Dict[str, Any],
-        redis_mgr: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Builds the user-facing readiness summary for Stress Testing."""
-        missing_packages = list(dependencies.get("missing_packages", []))
-        worker_state = str(worker.get("state", "stopped"))
-        redis_state = str(redis_mgr.get("state", "stopped"))
-        has_redis_manager = self.redis_manager is not None
-        queueing_available = (
-            bool(dependencies.get("rq_installed"))
-            and bool(dependencies.get("redis_installed"))
-            and bool(backend.get("redis_url_configured"))
-            and bool(backend.get("redis_reachable"))
-        )
-        can_stop_redis = has_redis_manager and redis_state == "live"
-
-        if missing_packages:
-            return {
-                "readiness_state": "missing_dependencies",
-                "readiness_message": self._missing_dependency_message(missing_packages),
-                "worker_status_label": "Install requirements first.",
-                "can_start_worker": False,
-                "ready_to_queue": False,
-                "can_start_redis": False,
-                "can_stop_redis": False,
-            }
-        if not bool(backend.get("redis_url_configured")):
-            return {
-                "readiness_state": "backend_not_configured",
-                "readiness_message": "Redis URL is not configured. Set REDIS_URL in your environment or .env file.",
-                "worker_status_label": "Redis not configured.",
-                "can_start_worker": False,
-                "ready_to_queue": False,
-                "can_start_redis": False,
-                "can_stop_redis": False,
-            }
-        if not bool(backend.get("redis_reachable")):
-            if redis_state == "starting":
-                return {
-                    "readiness_state": "redis_starting",
-                    "readiness_message": "Redis is starting. The panel will refresh automatically.",
-                    "worker_status_label": "Redis is starting.",
-                    "can_start_worker": False,
-                    "ready_to_queue": False,
-                    "can_start_redis": False,
-                    "can_stop_redis": False,
-                }
-            can_start_redis = has_redis_manager and redis_state not in {"starting", "live"}
-            return {
-                "readiness_state": "backend_unreachable",
-                "readiness_message": (
-                    f"Redis is not running at {self.config.redis_url}."
-                ),
-                "worker_status_label": "Redis offline.",
-                "can_start_worker": False,
-                "ready_to_queue": False,
-                "can_start_redis": can_start_redis,
-                "can_stop_redis": False,
-            }
-        if worker_state == "crashed":
-            return {
-                "readiness_state": "worker_crashed",
-                "readiness_message": (
-                    str(worker.get("last_error", "")).strip()
-                    or "Worker started, but exited immediately."
-                ),
-                "worker_status_label": "Managed worker crashed.",
-                "can_start_worker": True,
-                "ready_to_queue": False,
-                "can_start_redis": False,
-                "can_stop_redis": can_stop_redis,
-            }
-        if worker_state == "starting":
-            return {
-                "readiness_state": "worker_starting",
-                "readiness_message": "Local worker is starting. The panel will refresh automatically.",
-                "worker_status_label": "Managed worker is starting.",
-                "can_start_worker": False,
-                "ready_to_queue": False,
-                "can_start_redis": False,
-                "can_stop_redis": can_stop_redis,
-            }
-        if worker_state == "running":
-            return {
-                "readiness_state": "ready",
-                "readiness_message": "Ready. Queue a stress test now.",
-                "worker_status_label": "Managed worker is running.",
-                "can_start_worker": False,
-                "ready_to_queue": queueing_available,
-                "can_start_redis": False,
-                "can_stop_redis": can_stop_redis,
-            }
-        return {
-            "readiness_state": "worker_stopped",
-            "readiness_message": "Redis is live. Start the local worker to begin stress testing.",
-            "worker_status_label": "Managed worker is stopped.",
-            "can_start_worker": queueing_available,
-            "ready_to_queue": False,
-            "can_start_redis": False,
-            "can_stop_redis": can_stop_redis,
-        }
-
     def _sync_job_status(self, metadata: ScenarioJobMetadata) -> ScenarioJobMetadata:
         """
         Reconciles file-backed metadata with live RQ state when possible.
 
         Methodology:
-            Job execution can fail before worker-side stage metadata is written
-            (for example on platform-specific RQ runtime errors). In that case,
-            the UI would otherwise keep showing "queued". This reconciliation
-            keeps metadata aligned with Redis/RQ state for active jobs.
+            Job execution can fail before worker-side stage metadata is written.
+            This reconciliation keeps metadata aligned with Redis/RQ state for
+            active jobs without making the UI dependent on Redis durability.
         """
         if metadata.status in FINAL_SCENARIO_JOB_STATES:
             return metadata
@@ -717,9 +269,20 @@ class ScenarioJobService:
         """Returns queue availability and execution policy details."""
         dependencies = self._module_readiness()
         backend = self._backend_readiness(dependencies)
-        worker = self._worker_snapshot()
-        redis_mgr = self._redis_manager_snapshot()
-        readiness = self._readiness_summary(dependencies, backend, worker, redis_mgr)
+        worker_start_command = build_worker_start_command(self.config, self.worker_manager)
+        worker = build_worker_snapshot(
+            worker_manager=self.worker_manager,
+            worker_start_command=worker_start_command,
+        )
+        redis_mgr = build_redis_manager_snapshot(self.redis_manager)
+        readiness = build_readiness_summary(
+            config=self.config,
+            redis_manager=self.redis_manager,
+            dependencies=dependencies,
+            backend=backend,
+            worker=worker,
+            redis_mgr=redis_mgr,
+        )
         queueing_available = (
             bool(dependencies.get("rq_installed"))
             and bool(dependencies.get("redis_installed"))
@@ -739,8 +302,10 @@ class ScenarioJobService:
             "supported_job_types": [job_type.value for job_type in SUPPORTED_QUEUE_JOB_TYPES],
             "worker": worker,
             "redis_manager": redis_mgr,
-            "worker_start_command": self._worker_start_command(),
-            "worker_refresh_interval_ms": int(max(1.0, float(self.config.worker_start_grace_seconds)) * 1000.0),
+            "worker_start_command": worker_start_command,
+            "worker_refresh_interval_ms": int(
+                max(1.0, float(self.config.worker_start_grace_seconds)) * 1000.0
+            ),
             **readiness,
         }
 
@@ -770,12 +335,7 @@ class ScenarioJobService:
     def _assert_publicly_queueable(self, scenario_spec: ScenarioSpec) -> None:
         """
         Rejects scenario job types that are not yet supported by the public queue surface.
-
-        Methodology:
-            Only the currently executable job types are exposed so future consumers
-            cannot enqueue reserved families by accident.
         """
-
         if scenario_spec.job_type not in SUPPORTED_QUEUE_JOB_TYPES:
             raise NotImplementedError(
                 f"Public queueing for `{scenario_spec.job_type.value}` is reserved for a later plan."
@@ -788,15 +348,7 @@ class ScenarioJobService:
         scenario_spec: ScenarioSpec,
         baseline_results_dir: Optional[str],
     ) -> ScenarioJobMetadata:
-        """
-        Queues one typed scenario specification through the public job service.
-
-        Methodology:
-            This is the public queue boundary for normalized scenario contracts.
-            It rejects reserved job families up front so unsupported payloads do
-            not persist misleading job records or reach workers accidentally.
-        """
-
+        """Queues one typed scenario specification through the public job service."""
         self._assert_publicly_queueable(scenario_spec)
         resolved_results_dir = str(
             Path(baseline_results_dir).resolve()
@@ -840,7 +392,7 @@ class ScenarioJobService:
             self.store.save(metadata)
             return metadata
 
-        queue_class, retry_class = _resolve_rq_bindings()
+        _queue_class, retry_class = _resolve_rq_bindings()
         retry_policy = retry_class(max=self.config.max_retries) if retry_class is not None else None
         rq_job = queue.enqueue(
             run_portfolio_scenario_job,
@@ -850,9 +402,6 @@ class ScenarioJobService:
                 "scenario_spec_payload": metadata.scenario_spec,
                 "timeout_seconds": self.config.timeout_seconds,
             },
-            # rq uses signal.SIGALRM for job timeout enforcement, which does not
-            # exist on Windows. job_timeout=-1 disables rq's death-penalty
-            # entirely; the job function's own timeout_seconds handles subprocess limits.
             job_timeout=-1,
             retry=retry_policy,
         )
@@ -867,17 +416,7 @@ class ScenarioJobService:
         stress: StressMultipliers,
         baseline_results_dir: Optional[str],
     ) -> ScenarioJobMetadata:
-        """
-        Queues one portfolio scenario rerun and persists initial job metadata.
-
-        Args:
-            bundle: Active baseline artifact bundle.
-            stress: Scenario rerun multipliers from the terminal UI.
-            baseline_results_dir: Results root used by the worker to reload artifacts.
-
-        Returns:
-            Newly created job metadata in `queued` or immediate `failed` state.
-        """
+        """Queues one portfolio scenario rerun and persists initial job metadata."""
         scenario_spec = build_stress_scenario_spec(bundle=bundle, stress=stress)
         return self.enqueue_scenario_spec(
             bundle=bundle,
@@ -902,8 +441,6 @@ class ScenarioJobService:
             return self._redis_client
 
         try:
-            # RQ stores job data as pickled bytes. decode_responses=True causes
-            # 'utf-8' codec errors when Job.fetch reads binary payloads.
             client = redis_class.from_url(self.config.redis_url, decode_responses=False)
             client.ping()
         except (redis_error_class, ValueError):
@@ -911,3 +448,25 @@ class ScenarioJobService:
 
         self._redis_client = client
         return self._redis_client
+
+
+__all__ = [
+    "FINAL_SCENARIO_JOB_STATES",
+    "SUPPORTED_QUEUE_JOB_TYPES",
+    "Redis",
+    "RedisError",
+    "Queue",
+    "Retry",
+    "ScenarioJobMetadata",
+    "ScenarioJobService",
+    "ScenarioJobStatus",
+    "ScenarioJobStore",
+    "TerminalQueueConfig",
+    "run_portfolio_scenario_job",
+    "_resolve_redis_bindings",
+    "_resolve_rq_bindings",
+    "_scenario_job_id",
+    "_update_job_metadata",
+    "_update_job_stage",
+    "_utc_now_iso",
+]

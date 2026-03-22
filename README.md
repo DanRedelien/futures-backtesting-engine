@@ -132,6 +132,8 @@ sudo apt install redis-server
 - `src/backtest_engine/portfolio_layer/engine/engine.py` is the portfolio event loop with shared capital and multi-slot execution.
 - `src/backtest_engine/runtime/terminal_ui/` is the active FastAPI analytics UI.
 - `src/backtest_engine/analytics/` contains artifact builders, reports, metrics, and shared analytics transforms.
+- `src/backtest_engine/services/scenario_job_service.py` remains the public scenario-queue entry point, with adjacent helper modules for metadata storage and worker execution.
+- `src/data/ib_fetcher.py` remains the public IB data entry point, with adjacent helper modules for contract resolution, cache/checkpoint storage, and historical backfill orchestration.
 
 ## Results And Artifacts
 
