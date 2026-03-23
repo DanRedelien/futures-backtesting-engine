@@ -20,7 +20,7 @@ Add real image links after you capture them. Keep the images reasonably wide and
 
 ### Portfolio Analytics
 
-<img width="1586" height="732" alt="image" src="https://github.com/user-attachments/assets/b67de6f8-3a00-4109-bdcb-13fccfa6aa2d" />
+<img width="1593" height="732" alt="image" src="https://github.com/user-attachments/assets/122c89df-7f34-406c-9d2d-05bdf6a1b1f9" />
 
 
 ### Exit Analysis
