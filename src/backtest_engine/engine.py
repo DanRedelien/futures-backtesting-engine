@@ -347,16 +347,6 @@ class BacktestEngine:
             is_last_bar = i == data_len - 1
             is_eod = is_last_bar or dates[i + 1] != current_date
 
-            if is_eod and pending_orders:
-                for order in pending_orders:
-                    fill = self.execution.execute_order(
-                        order, bar, execute_at_close=True,
-                        effective_spread_ticks=spread_ticks,
-                    )
-                    if fill:
-                        self.portfolio.update(fill, current_prices)
-                pending_orders = []
-
             # Force-close open positions at EOD close time if configured
             eod_close = self.settings.eod_close_time
             if is_eod and eod_close:

@@ -60,6 +60,7 @@ def save_portfolio_results(
     data_map: Optional[Dict[Any, pd.DataFrame]] = None,
     slot_weights: Optional[Dict[int, float]] = None,
     instrument_specs: Optional[Dict[str, Dict]] = None,
+    slot_vol_params: Optional[Dict[int, Dict[str, float]]] = None,
     output_dir: Optional[Path] = None,
     manifest_metadata: Optional[Dict[str, Any]] = None,
 ) -> Path:
@@ -190,7 +191,28 @@ def save_portfolio_results(
         
         if not trades_df.empty and data_map:
             from src.backtest_engine.analytics.exit_analysis import enrich_trades_with_exit_analytics
-            trades_df = enrich_trades_with_exit_analytics(trades_df, data_map)
+            if slot_vol_params:
+                enriched_parts: List[pd.DataFrame] = []
+                for slot_id, slot_slice in trades_df.groupby("slot_id", dropna=False):
+                    params = slot_vol_params.get(int(slot_id), {})
+                    enriched_parts.append(
+                        enrich_trades_with_exit_analytics(
+                            slot_slice.copy(),
+                            data_map,
+                            regime_window=params.get("regime_window"),
+                            history_window=params.get("history_window"),
+                            vol_min_pct=params.get("vol_min_pct"),
+                            vol_max_pct=params.get("vol_max_pct"),
+                        )
+                    )
+                trades_df = (
+                    pd.concat(enriched_parts)
+                    .sort_index()
+                    if enriched_parts
+                    else trades_df
+                )
+            else:
+                trades_df = enrich_trades_with_exit_analytics(trades_df, data_map)
             
         trades_df.to_parquet(out / "trades.parquet")
         saved.append("trades.parquet")

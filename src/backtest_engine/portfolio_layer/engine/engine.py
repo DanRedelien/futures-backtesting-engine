@@ -677,6 +677,28 @@ class PortfolioBacktestEngine:
         report    = analytics.get_full_report_str(metrics, all_trades)
         print(report)
 
+        def _optional_int(value: Any) -> Optional[int]:
+            """Safely coerces optional numeric config values to int."""
+            if value is None:
+                return None
+            try:
+                if pd.isna(value):
+                    return None
+            except Exception:
+                pass
+            return int(value)
+
+        def _optional_float(value: Any) -> Optional[float]:
+            """Safely coerces optional numeric config values to float."""
+            if value is None:
+                return None
+            try:
+                if pd.isna(value):
+                    return None
+            except Exception:
+                pass
+            return float(value)
+
         save_portfolio_results(
             history=history,
             exposure_df=self.book.get_exposure_df(),
@@ -691,6 +713,15 @@ class PortfolioBacktestEngine:
             data_map=self._data_map,
             slot_weights={
                 i: slot.weight for i, slot in enumerate(self.config.slots)
+            },
+            slot_vol_params={
+                i: {
+                    "regime_window": _optional_int(slot.params.get("vol_regime_window")),
+                    "history_window": _optional_int(slot.params.get("vol_history_window")),
+                    "vol_min_pct": _optional_float(slot.params.get("vol_min_pct")),
+                    "vol_max_pct": _optional_float(slot.params.get("vol_max_pct")),
+                }
+                for i, slot in enumerate(self.config.slots)
             },
             instrument_specs=self.settings.instrument_specs,
             output_dir=output_dir,

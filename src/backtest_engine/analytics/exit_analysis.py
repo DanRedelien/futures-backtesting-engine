@@ -143,14 +143,13 @@ def enrich_trades_with_exit_analytics(
         # Pre-calculate rolling volatility (matching VolatilityRegimeFilter logic)
         # 1. Price Standard Deviation (Window=_rw)
         # 2. Percentile Rank (Window=_hw)
+        # 3. Shift by one bar so volatility at entry never includes the
+        #    entry bar close (entry is executed at open).
         try:
             rolling_std = df_sym["close"].rolling(window=_rw, min_periods=_rw // 2).std()
-            rolling_vol = rolling_std.rolling(window=_hw, min_periods=_hw // 2).rank(pct=True)
+            rolling_vol = rolling_std.rolling(window=_hw, min_periods=_hw // 2).rank(pct=True).shift(1)
         except Exception:
             rolling_vol = pd.Series(np.nan, index=df_sym.index)
-
-        # Pre-cache index for searchsorted
-        idx_array = df_sym.index.values
 
         # Pre-cache index for searchsorted
         idx_array = df_sym.index.values
@@ -180,12 +179,15 @@ def enrich_trades_with_exit_analytics(
             slip = row.get("slippage", 0.0)
             costs = (0.0 if pd.isna(comm) else float(comm)) + (0.0 if pd.isna(slip) else float(slip))
             
-            # MFE / MAE starts strictly after entry so pre-position entry-bar
-            # highs/lows are never counted in the excursion window.
+            # MFE / MAE includes the entry bar because the position is live from
+            # entry open onward.
             try:
                 entry_dt = _to_np_dt64(entry)
                 exit_dt = _to_np_dt64(exit_)
-                start_pos = np.searchsorted(idx_array, entry_dt, side='right')
+                # Include the entry bar in excursion analysis. The trade is live
+                # from entry open, so excluding the full entry bar introduces an
+                # artificial one-bar delay in MFE/MAE.
+                start_pos = np.searchsorted(idx_array, entry_dt, side='left')
                 end_pos = np.searchsorted(idx_array, exit_dt, side='right')
                 trade_bars = df_sym.iloc[start_pos:end_pos]
                 if not trade_bars.empty:

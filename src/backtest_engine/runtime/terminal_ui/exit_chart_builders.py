@@ -403,16 +403,20 @@ def build_exit_vol_regime_payload(
         }
 
     settings = BacktestSettings()
-    v_min = (
-        float(trades["vol_min_pct"].iloc[0])
-        if "vol_min_pct" in trades.columns and pd.notna(trades["vol_min_pct"].iloc[0])
-        else settings.vol_min_pct_default
-    )
-    v_max = (
-        float(trades["vol_max_pct"].iloc[0])
-        if "vol_max_pct" in trades.columns and pd.notna(trades["vol_max_pct"].iloc[0])
-        else settings.vol_max_pct_default
-    )
+    if "vol_min_pct" in trades.columns:
+        min_series = pd.to_numeric(trades["vol_min_pct"], errors="coerce").dropna()
+    else:
+        min_series = pd.Series(dtype=float)
+    if "vol_max_pct" in trades.columns:
+        max_series = pd.to_numeric(trades["vol_max_pct"], errors="coerce").dropna()
+    else:
+        max_series = pd.Series(dtype=float)
+
+    v_min = float(min_series.median()) if not min_series.empty else settings.vol_min_pct_default
+    v_max = float(max_series.median()) if not max_series.empty else settings.vol_max_pct_default
+    if v_min >= v_max:
+        v_min = float(settings.vol_min_pct_default)
+        v_max = float(settings.vol_max_pct_default)
 
     bucket_labels = ["Compression", "Normal", "Panic"]
     try:
