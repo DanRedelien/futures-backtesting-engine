@@ -58,7 +58,7 @@ DECOMPOSITION_PNL_CONTRIB_COLUMN = "PnL Contrib (%)"
 TITLE_EXIT_MFE_MAE = "MFE vs MAE"
 TITLE_EXIT_PNL_DECAY = "PnL Decay (Forward Horizon)"
 TITLE_EXIT_HOLDING_TIME = "Avg PnL by Holding Time"
-TITLE_EXIT_VOL_REGIME = "Avg PnL by Vol after Entry"
+TITLE_EXIT_VOL_REGIME = "Avg PnL by Exit volatility (soon will change to vol drag)"
 TITLE_EXIT_REASON = "Total PnL by Exit Reason"
 
 # Default sub-view for the exit-analysis detail workspace.
