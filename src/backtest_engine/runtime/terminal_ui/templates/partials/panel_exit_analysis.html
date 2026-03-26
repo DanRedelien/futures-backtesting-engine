@@ -25,10 +25,8 @@
                 </thead>
                 <tbody>
                     {% for row in summary_rows %}
-                    <tr
-                        class="terminal-table__row--clickable {% if row.get('Strategy') == exit_strategy %}is-selected{% endif %}"
-                        data-exit-strategy="{{ row.get('Strategy', '') }}"
-                    >
+                    <tr class="terminal-table__row--clickable {% if row.get('Strategy') == exit_strategy %}is-selected{% endif %}"
+                        data-exit-strategy="{{ row.get('Strategy', '') }}">
                         {% for column in summary_columns %}
                         <td>{{ row.get(column, "") }}</td>
                         {% endfor %}
@@ -44,30 +42,13 @@
             <h3>Detail Workspace</h3>
         </div>
         <nav class="terminal-tabs terminal-tabs--secondary">
-            <button
-                class="terminal-tab"
-                data-exit-detail-view="trade-log"
-            >Trade Log</button>
-            <button
-                class="terminal-tab"
-                data-exit-detail-view="execution-quality"
-            >Execution Quality</button>
-            <button
-                class="terminal-tab"
-                data-exit-detail-view="time-context"
-            >Time &amp; Context</button>
-            <button
-                class="terminal-tab"
-                data-exit-detail-view="exit-breakdown"
-            >Exit Breakdown</button>
+            <button class="terminal-tab" data-exit-detail-view="trade-log">Trade Log</button>
+            <button class="terminal-tab" data-exit-detail-view="execution-quality">Execution Quality</button>
+            <button class="terminal-tab" data-exit-detail-view="time-context">Time &amp; Context</button>
+            <button class="terminal-tab" data-exit-detail-view="exit-breakdown">Exit Breakdown</button>
         </nav>
-        <div
-            id="exit-detail-workspace"
-            hx-get="/partials/exit-analysis/detail"
-            hx-include="#dashboard-filters"
-            hx-trigger="load, exit-detail-change from:body"
-            hx-target="#exit-detail-workspace"
-            hx-swap="innerHTML"
-        ></div>
+        <div id="exit-detail-workspace" hx-get="/partials/exit-analysis/detail" hx-include="#dashboard-filters"
+            hx-trigger="load, exit-detail-change from:body" hx-target="#exit-detail-workspace" hx-swap="innerHTML">
+        </div>
     </section>
 </section>

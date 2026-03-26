@@ -88,16 +88,26 @@ def compute_pnl_dist_stats(
     Returns:
         Dict with keys: skew, kurtosis, var_95, cvar_95, var_99, mean, std.
     """
-    if daily_pnl is None or daily_pnl.dropna().empty:
-        return {
-            "skew": float("nan"), "kurtosis": float("nan"),
-            "var_95": float("nan"), "cvar_95": float("nan"),
-            "var_99": float("nan"), "mean": float("nan"), "std": float("nan"),
-        }
+    empty_stats: Dict[str, float] = {
+        "skew": float("nan"), "kurtosis": float("nan"),
+        "var_95": float("nan"), "cvar_95": float("nan"),
+        "var_99": float("nan"), "mean": float("nan"), "std": float("nan"),
+    }
+    if daily_pnl is None:
+        return empty_stats
 
-    clean: pd.Series = daily_pnl.dropna()
-    skew_val: float  = float(stats.skew(clean))
-    kurt_val: float  = float(stats.kurtosis(clean))  # excess (Fisher)
+    # Match dropna(): inf is not NaN, so replace inf before emptiness check
+    clean: pd.Series = daily_pnl.replace([float("inf"), float("-inf")], float("nan")).dropna()
+    if clean.empty:
+        return empty_stats
+
+    # SciPy throws RuntimeWarning if length < 3 or variance is 0
+    if len(clean) > 2 and float(clean.std()) > 0:
+        skew_val: float  = float(stats.skew(clean))
+        kurt_val: float  = float(stats.kurtosis(clean))  # excess (Fisher)
+    else:
+        skew_val: float  = float("nan")
+        kurt_val: float  = float("nan")
 
     var_95_threshold = float(clean.quantile(1 - var_confidence))
     var_99_threshold = float(clean.quantile(1 - tail_confidence))

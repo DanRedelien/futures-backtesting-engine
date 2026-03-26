@@ -40,21 +40,21 @@ MODES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   ── Data download ─────────────────────────────────────────────────────────
-  python run.py --download ES NQ YM RTY CL GC SI
+  python run.py --download 6E
 
   ── Single backtest ───────────────────────────────────────────────────────
-  python run.py --backtest --strategy sma --symbol YM --tf 30m --dashboard
+  python run.py --backtest --strategy stat_level --symbol ES --tf 1h --dashboard
   python run.py --backtest --strategy zscore --symbol NQ --tf 30m --dashboard
 
   ── Walk-Forward Optimization (single) ────────────────────────────────────
-  python run.py --wfo --strategy zscore --symbol ES --tf 1h
+  python run.py --wfo --strategy stat_level --symbol ES --tf 1h
 
   ── Portfolio backtest ────────────────────────────────────────────────────
   python run.py --portfolio-backtest --dashboard
   python run.py --portfolio-backtest --portfolio-config path/to/config.yaml
 
   ── Batch: one strategy, many symbols / timeframes ────────────────────────
-  python run.py batch --strategies sma zscore mean_rev sma_pullback intraday_momentum stat_level ict_ob --symbol GC SI CL --tf 30m
+  python run.py batch --strategies sma mean_rev ict_ob zscore sma_pullback intraday_momentum stat_level --symbol CL NG ES GC NQ RTY SI YM --tf 1h
   python run.py batch --strategies sma zscore --symbol ES --tf 1h 30m
 
   ── WFO-Batch: full walk-forward sweep across scenarios ───────────────────

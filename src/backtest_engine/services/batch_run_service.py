@@ -310,6 +310,9 @@ def run_batch_backtests(
             results=successful_results,
             figure_width=float(settings.batch_plot_figure_width),
             figure_height=float(settings.batch_plot_figure_height),
+            min_pnl_pct=float(settings.batch_plot_min_pnl_pct),
+            max_drawdown_pct=float(settings.batch_plot_max_drawdown_pct),
+            max_table_rows=int(settings.batch_plot_max_table_rows),
         )
     else:
         print("[Batch] No successful scenarios to plot.")

@@ -29,6 +29,7 @@ import pandas as pd
 
 from src.backtest_engine.execution import Order
 from src.strategies.base import BaseStrategy
+from src.strategies.filters import VolatilityRegimeFilter
 
 
 @dataclass
@@ -51,6 +52,13 @@ class StatLevelConfig:
     atr_window: int = 14
     atr_tp_mult: float = 4.0             # Take Profit distance in ATRs
     sl_offset_ticks: int = 1             # Strict tick offset completely behind the level (e.g., 1 tick)
+
+    # ── Volatility regime filter ───────────────────────────────────────────────
+    use_vol_filter: bool = False
+    vol_regime_window: int = 50
+    vol_history_window: int = 500
+    vol_min_pct: float = 0.20
+    vol_max_pct: float = 0.80
 
 
 class _Level(NamedTuple):
@@ -140,6 +148,18 @@ class StatisticalLevelStrategy(BaseStrategy):
 
         self._active_levels: List[_Level] = []
 
+        # ── Volatility regime filter ───────────────────────────────────────────
+        self._vol_filter: Optional[VolatilityRegimeFilter] = None
+        if cfg.use_vol_filter:
+            self._vol_filter = VolatilityRegimeFilter(
+                price=close,
+                regime_window=cfg.vol_regime_window,
+                history_window=cfg.vol_history_window,
+                min_pct=cfg.vol_min_pct,
+                max_pct=cfg.vol_max_pct,
+            )
+            print(f"[STAT_LEVEL] VolFilter enabled (window={cfg.vol_regime_window})")
+
         vol_type_str = "Volume" if self._use_volume else "TrueRange"
         print(
             f"[STAT_LEVEL] Ready | Lookback={cfg.lookback_window} | "
@@ -200,8 +220,11 @@ class StatisticalLevelStrategy(BaseStrategy):
 
         # ── Check for Entries (Mitigation) ─────────────────────────────────────
         if not self._invested and self._active_levels:
+            # Volatility filter check
+            is_vol_allowed = self._vol_filter.is_allowed(timestamp) if self._vol_filter else True
+
             # Reversal confirmation filter: Was this touch accompanied by high relative volume/volatility?
-            is_valid_touch = c_vol_metric > (c_vol_sma * self.config.volatility_mult)
+            is_valid_touch = (c_vol_metric > (c_vol_sma * self.config.volatility_mult)) and is_vol_allowed
             
             # Find the first level we touched. We process from newest to oldest.
             mitigated_idx = -1

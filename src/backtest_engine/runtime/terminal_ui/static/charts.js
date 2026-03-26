@@ -335,9 +335,9 @@
             label: isMini
                 ? { show: false }
                 : {
-                      formatter: threshold.label || "",
-                      position: "start",
-                  },
+                    formatter: threshold.label || "",
+                    position: "start",
+                },
         }));
         const builtSeries = buildEchartsSeries(payload.series);
         const axisBounds = computeNiceAxisBounds(
@@ -350,21 +350,21 @@
             : { left: 12, right: 12, top: 40, bottom: 28, containLabel: true };
         const legend = isMini
             ? {
-                  show: true,
-                  top: 0,
-                  left: "center",
-                  padding: [0, 0],
-                  itemGap: 8,
-                  itemWidth: 12,
-                  itemHeight: 10,
-                  textStyle: { color: "#FFFFFF", fontSize: 12, fontFamily: "JetBrains Mono" },
-                  selectedMode: true,
-                  inactiveColor: "#666666",
-              }
+                show: true,
+                top: 0,
+                left: "center",
+                padding: [0, 0],
+                itemGap: 8,
+                itemWidth: 12,
+                itemHeight: 10,
+                textStyle: { color: "#FFFFFF", fontSize: 12, fontFamily: "JetBrains Mono" },
+                selectedMode: true,
+                inactiveColor: "#666666",
+            }
             : {
-                  top: 0,
-                  textStyle: { color: "#FFFFFF" },
-              };
+                top: 0,
+                textStyle: { color: "#FFFFFF" },
+            };
 
         chart.setOption({
             backgroundColor: "#0D0D0D",
@@ -520,7 +520,8 @@
 
     function renderBarChart(element, payload) {
         if (!payload.categories || payload.categories.length === 0) {
-            element.innerHTML = '<div class="terminal-empty-state">No bar-chart data available.</div>';
+            const reason = payload.emptyReason ? " " + payload.emptyReason : "";
+            element.innerHTML = '<div class="terminal-empty-state">No bar-chart data available.' + reason + '</div>';
             return;
         }
         resetEchartInstance(element);
@@ -550,7 +551,7 @@
             animation: false,
             textStyle: { color: "#FFFFFF", fontFamily: "JetBrains Mono" },
             tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-            legend: { top: 0, textStyle: { color: "#FFFFFF" } },
+            legend: payload.hideLegend ? { show: false } : { top: 0, textStyle: { color: "#FFFFFF" } },
             grid: { left: 56, right: hasSecondAxis ? 56 : 20, top: 36, bottom: showAllCategoryLabels ? 52 : 28 },
             xAxis: {
                 type: "category",
@@ -564,20 +565,26 @@
                 axisLine: { lineStyle: { color: "#222222" } },
             },
             yAxis: yAxis,
-            series: (payload.series || []).map((item, index) => ({
-                name: item.name,
-                type: "bar",
-                yAxisIndex: item.yAxisIndex || 0,
-                data: item.itemColors
-                    ? (item.values || []).map((v, i) => ({
-                          value: v,
-                          itemStyle: { color: (item.itemColors || [])[i] || "#8A8A8A" },
-                      }))
-                    : item.values,
-                itemStyle: item.itemColors
-                    ? undefined
-                    : { color: ["#22C55E", "#3B82F6", "#EAB308"][index % 3] },
-            })),
+            series: (payload.series || []).map((item, index) => {
+                const isItemPercent = yAxisIsPercent || item.yAxisIndex === 1;
+                return {
+                    name: item.name,
+                    type: "bar",
+                    yAxisIndex: item.yAxisIndex || 0,
+                    tooltip: {
+                        valueFormatter: (value) => Number(value).toFixed(2) + (isItemPercent ? "%" : "")
+                    },
+                    data: item.itemColors
+                        ? (item.values || []).map((v, i) => ({
+                            value: v,
+                            itemStyle: { color: (item.itemColors || [])[i] || "#8A8A8A" },
+                        }))
+                        : item.values,
+                    itemStyle: item.itemColors
+                        ? undefined
+                        : { color: ["#22C55E", "#3B82F6", "#EAB308"][index % 3] },
+                };
+            }),
         });
         attachResize(element, chart);
     }
@@ -775,7 +782,7 @@
                 // Remove old listener if re-rendering
                 const newToggle = toggleBenchmark.cloneNode(true);
                 toggleBenchmark.parentNode.replaceChild(newToggle, toggleBenchmark);
-                
+
                 newToggle.addEventListener("change", (e) => {
                     benchmarkSeries.applyOptions({
                         visible: e.target.checked
@@ -860,18 +867,18 @@
                 // axis scaling without requiring a secondary coordinate system.
                 ...(payload.diagonal
                     ? [
-                          {
-                              name: "Break-even",
-                              type: "line",
-                              showSymbol: false,
-                              data: [
-                                  [payload.diagonal.x1, payload.diagonal.y1],
-                                  [payload.diagonal.x2, payload.diagonal.y2],
-                              ],
-                              lineStyle: { type: "dashed", color: "#6B7280", width: 1 },
-                              itemStyle: { color: "#6B7280" },
-                          },
-                      ]
+                        {
+                            name: "Break-even",
+                            type: "line",
+                            showSymbol: false,
+                            data: [
+                                [payload.diagonal.x1, payload.diagonal.y1],
+                                [payload.diagonal.x2, payload.diagonal.y2],
+                            ],
+                            lineStyle: { type: "dashed", color: "#6B7280", width: 1 },
+                            itemStyle: { color: "#6B7280" },
+                        },
+                    ]
                     : []),
             ],
         });

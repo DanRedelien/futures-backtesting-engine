@@ -59,7 +59,7 @@ class BacktestSettings(BaseSettings):
     bar_size: float = 0.0         # Threshold for volume / range bar types
 
     # ── Portfolio & execution ──────────────────────────────────────────────────
-    initial_capital: float = 1_000_000.0
+    initial_capital: float = 100_000.0
     risk_free_rate: float = 0.02
     commission_rate: float = 2.5      # Per contract, in dollars
     fixed_qty: int = 1                # Default number of contracts per signal (for single strategy mode)
@@ -102,6 +102,11 @@ class BacktestSettings(BaseSettings):
     vol_history_window_default: int = 500       # Historical window for percentile ranking of volatility
     vol_min_pct_default: float = 0.20           # Lower percentile bound: below this is 'Compression'
     vol_max_pct_default: float = 0.80           # Upper percentile bound: above this is 'Panic'
+
+    # ── Batch Plot Defaults ───────────────────────────────────────────────────
+    batch_plot_min_pnl_pct: float = -80.0       # Hide strategies if final PnL drops below this %
+    batch_plot_max_drawdown_pct: float = 80.0   # Hide strategies if max drawdown exceeds this %
+    batch_plot_max_table_rows: int = 20         # Maximum number of rows in the summary table
 
     # ── IB Fetcher ─────────────────────────────────────────────────────────────
     ib_host: str = "127.0.0.1"

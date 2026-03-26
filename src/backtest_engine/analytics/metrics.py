@@ -29,7 +29,7 @@ def calc_sample_sharpe(returns: pd.Series, risk_free_rate_per_period: float = 0.
     Returns:
         Non-annualised sample Sharpe ratio.
     """
-    clean = returns.dropna()
+    clean = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if clean.empty:
         return 0.0
 
@@ -120,7 +120,7 @@ def calc_annualised_vol(returns: pd.Series, bars_per_year: float) -> float:
     Returns:
         Annualised volatility.
     """
-    clean = returns.dropna()
+    clean = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if clean.empty:
         return 0.0
     return float(clean.std() * np.sqrt(bars_per_year))
@@ -168,7 +168,7 @@ def calc_sortino(
     Returns:
         Sortino Ratio.
     """
-    downside = returns.dropna()
+    downside = returns.replace([np.inf, -np.inf], np.nan).dropna()
     downside = downside[downside < 0]
     downside_std = float(downside.std() * np.sqrt(bars_per_year)) if not downside.empty else 0.0
     return (cagr - risk_free_rate) / downside_std if downside_std > 0 else 0.0
@@ -234,7 +234,7 @@ def calc_dsr(
     Returns:
         Deflated Sharpe Ratio (probability that the Sharpe ratio is not due to chance).
     """
-    clean_returns = returns.dropna()
+    clean_returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if len(clean_returns) < 30:
         return 0.0
 
@@ -284,7 +284,7 @@ def calc_return_stats(returns: pd.Series) -> tuple[float, float]:
     Returns:
         Tuple of (T-Statistic, P-Value).
     """
-    clean_returns = returns.dropna()
+    clean_returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if len(clean_returns) < 2 or float(clean_returns.std()) == 0.0:
         return 0.0, 1.0
 

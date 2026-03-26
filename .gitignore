@@ -40,7 +40,7 @@ Thumbs.db
 
 # Local data / artifacts
 data/
-src/data/
+#src/data/
 # dev_context: only CLEAN_CODE_MCP.md is versioned (everything else stays local)
 dev_context/*
 !dev_context/CLEAN_CODE_MCP.md

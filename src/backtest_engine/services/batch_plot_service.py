@@ -38,6 +38,9 @@ def show_single_batch_plot(
     results: Sequence[SingleBatchResult],
     figure_width: float,
     figure_height: float,
+    min_pnl_pct: float = -80.0,
+    max_drawdown_pct: float = 80.0,
+    max_table_rows: int = 20,
 ) -> None:
     """
     Renders one popup with log-PnL curves and a compact KPI table.
@@ -46,6 +49,9 @@ def show_single_batch_plot(
         results: Successful batch backtest results.
         figure_width: Matplotlib figure width in inches.
         figure_height: Matplotlib figure height in inches.
+        min_pnl_pct: Floor PnL requirement. Strategies below this are dropped.
+        max_drawdown_pct: Ceiling MDD requirement. Strategies exceeding this are dropped.
+        max_table_rows: Soft limit for matplotlib table row counts.
     """
     if not results:
         return
@@ -53,6 +59,16 @@ def show_single_batch_plot(
     import matplotlib.pyplot as plt
 
     ordered_results = sorted(results, key=lambda item: item.pnl_pct, reverse=True)
+
+    # Filter out strategies exceeding configured loss or drawdown bounds
+    ordered_results = [
+        r for r in ordered_results
+        if r.pnl_pct >= min_pnl_pct and r.max_drawdown_pct <= max_drawdown_pct
+    ]
+    if not ordered_results:
+        print(f"[WARNING] All strategies filtered out by thresholds (PnL >= {min_pnl_pct:.1f}%, MDD <= {max_drawdown_pct:.1f}%). Nothing to plot.")
+        return
+
     fig, (chart_ax, table_ax) = plt.subplots(
         1,
         2,
@@ -75,7 +91,16 @@ def show_single_batch_plot(
     chart_ax.set_xlabel("Date")
     chart_ax.set_ylabel("log(total_value / initial_capital)")
     chart_ax.grid(alpha=0.2)
-    legend = chart_ax.legend(loc="upper left", fontsize=8)
+
+    # Make legend adapt to high number of strategies to avoid covering the whole chart
+    legend_cols = 1
+    if len(ordered_results) > 30:
+        legend_cols = 3
+    elif len(ordered_results) > 15:
+        legend_cols = 2
+
+    legend_fontsize = 6 if len(ordered_results) > 15 else 8
+    legend = chart_ax.legend(loc="lower left", fontsize=legend_fontsize, ncol=legend_cols)
 
     legend_toggle_registry = {}
     for plotted_line, legend_line, legend_text in zip(
@@ -101,11 +126,20 @@ def show_single_batch_plot(
         item_alpha = 1.0 if is_visible else 0.25
         legend_line.set_alpha(item_alpha)
         legend_text.set_alpha(item_alpha)
+
+        # Dynamically rescale the Y-axis based on remaining visible lines
+        chart_ax.relim(visible_only=True)
+        chart_ax.autoscale_view()
         fig.canvas.draw_idle()
 
     fig.canvas.mpl_connect("pick_event", _handle_legend_pick)
 
     table_ax.axis("off")
+
+    # Limit table length so it doesn't break matplotlib layouts
+    is_truncated = len(ordered_results) > max_table_rows
+    table_results = ordered_results[:max_table_rows]
+
     table_rows = [
         [
             _format_summary_scenario_label(result),
@@ -113,8 +147,13 @@ def show_single_batch_plot(
             f"{result.max_drawdown_pct:.2f}%",
             f"{result.sharpe_ratio:.2f}",
         ]
-        for result in ordered_results
+        for result in table_results
     ]
+
+    if is_truncated:
+        omitted = len(ordered_results) - max_table_rows
+        table_rows.append([f"... (+{omitted} omitted)", "...", "...", "..."])
+
     table = table_ax.table(
         cellText=table_rows,
         colLabels=["Scenario", "PnL%", "MDD%", "Sharpe"],
