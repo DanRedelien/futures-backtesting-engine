@@ -200,13 +200,18 @@ def _run_batch_worker(
             ruin_equity_ratio=float(settings.batch_plot_ruin_equity_ratio),
         )
 
+        raw_mdd_pct = float(metrics.get("Max Drawdown", 0.0) * 100.0)
+        if not np.isfinite(raw_mdd_pct):
+            raw_mdd_pct = 0.0
+        drawdown_depth_pct = min(abs(raw_mdd_pct), abs(floor_pct))
+
         return SingleBatchResult(
             scenario=scenario,
             status="completed",
             timestamps=history.index.to_list(),
             log_equity=log_equity.tolist(),
             pnl_pct=max(float(metrics.get("Total Return", 0.0) * 100.0), floor_pct),
-            max_drawdown_pct=max(float(metrics.get("Max Drawdown", 0.0) * 100.0), floor_pct),
+            max_drawdown_pct=drawdown_depth_pct,
             sharpe_ratio=float(metrics.get("Sharpe Ratio", 0.0)),
         )
     except Exception as exc:

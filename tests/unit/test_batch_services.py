@@ -60,7 +60,7 @@ def test_show_single_batch_plot_makes_legend_entries_pickable(monkeypatch: pytes
         timestamps=[1, 2, 3],
         log_equity=[0.0, -0.1, -0.2],
         pnl_pct=-18.0,
-        max_drawdown_pct=-22.0,
+        max_drawdown_pct=22.0,
         sharpe_ratio=-0.3,
     )
 
@@ -73,6 +73,49 @@ def test_show_single_batch_plot_makes_legend_entries_pickable(monkeypatch: pytes
     assert legend is not None
     assert legend.get_lines()[0].get_picker() is True
     assert legend.get_texts()[0].get_picker() is True
+
+    plt.close(figure)
+
+
+def test_show_single_batch_plot_filters_by_drawdown_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Drawdown filter should drop scenarios whose drawdown depth exceeds the cap.
+    """
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    included = SingleBatchResult(
+        scenario=BatchScenario(strategy_id="sma", symbol="ES", timeframe="30m"),
+        status="completed",
+        timestamps=[1, 2, 3],
+        log_equity=[0.0, -0.05, -0.10],
+        pnl_pct=-5.0,
+        max_drawdown_pct=25.0,
+        sharpe_ratio=0.1,
+    )
+    excluded = SingleBatchResult(
+        scenario=BatchScenario(strategy_id="zscore", symbol="NQ", timeframe="30m"),
+        status="completed",
+        timestamps=[1, 2, 3],
+        log_equity=[0.0, -0.15, -0.20],
+        pnl_pct=-12.0,
+        max_drawdown_pct=85.0,
+        sharpe_ratio=-0.2,
+    )
+
+    show_single_batch_plot(
+        results=[included, excluded],
+        figure_width=8.0,
+        figure_height=4.0,
+        max_drawdown_pct=80.0,
+    )
+
+    figure = plt.gcf()
+    chart_ax = figure.axes[0]
+    assert len(chart_ax.lines) == 2  # one strategy + horizontal zero-reference
+    assert chart_ax.lines[0].get_label() == included.scenario.legend_label
 
     plt.close(figure)
 
