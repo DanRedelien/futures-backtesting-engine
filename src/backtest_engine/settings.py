@@ -138,21 +138,22 @@ class BacktestSettings(BaseSettings):
         return self.terminal_ui
 
     # ── Walk-Forward Validation (WFV) scheduling ──────────────────────────────
-    wfo_n_folds: int = 4             # Number of walk-forward folds
-    wfo_test_size_pct: float = 0.20  # Fraction of total data used per test fold
-    wfo_n_trials: int = 220          # Optuna trials per fold
+    wfo_n_folds: int = 5             # Number of walk-forward folds
+    wfo_test_size_pct: float = 0.10  # Fraction of total data used per test fold
+    wfo_n_trials: int = 120          # Optuna trials per fold
     wfo_max_parameters: int = 6      # Strict maximum limit for optimized variables
 
     # Pruning / quality gates
-    wfo_prune_min_trades: int = 8         # Minimum trades for a trial to pass
-    wfo_prune_max_dd_pct: float = 35.0    # Max drawdown % before early pruning
-    wfo_prune_target_trades_mult: int = 3  # target_trades = min_trades * this
+    wfo_prune_min_trades: int = 40         # Minimum trades for a trial to pass
+    wfo_prune_max_dd_pct: float = 25.0    # Max drawdown % before early pruning
+    wfo_prune_target_trades_mult: int = 2  # target_trades = min_trades * this
+
     # Robustness / consistency gates
     wfo_pass_min_profitable_folds: int = 3
     wfo_warn_min_profitable_folds: int = 2
     wfo_pass_min_consecutive_profitable_folds: int = 2
     wfo_warn_min_consecutive_profitable_folds: int = 1
-    wfo_min_sharpe_per_fold: float = 0.0
+    wfo_min_sharpe_per_fold: float = 0.5
 
     # Lightweight batch orchestration
     batch_max_workers: int = Field(
